@@ -1,0 +1,644 @@
+# **GSE72540 Analysis**
+
+
+
+```{r}
+
+bbcViz::display_table(tibble("Condition" = c("Normal controls", "CSU"),
+       "N" = c("7", "14"), "Sample type"=c("Skin biopsy", "Two cutaneous biopsies including skin from an active wheal and one biopsy from non-lesion skin"), "Sample pathology" = c("normal", "10 lesional and 14 non-lesional biopsies"), "comorbidities"=c("No clinical data", "1 patient with autoimmune thyroiditis and hypothyroidism; 1 patient with autoimmune thyroiditis, hypothyroidism and vitiligo; 1 patient with multiple sclerosis; 1 patient with Sjogren's syndrome; 10 patients with only urticaria") ))
+
+```
+
+<!-- Data import -->
+
+```{r GSE72540 import data}
+eset_GSE72540 <- readRDS("/home/DA82_SUR/Internship_data/CSU/eSet/GSE72540_eset.rds")
+# eset_GSE72540 <- filter_samples_from_values(eset_GSE72540, column = "DiseaseState",
+#                            values = c("normal control", "autoimmune thyroiditis;hypothyroidism;urticaria", "autoimmune thyroiditis;hypothyroidism;urticaria;vitiligo", "multiple sclerosis (MS);urticaria", "Sjogren's syndrome (SS);urticaria"))
+# pData(eset_GSE72540)
+```
+
+```{r}
+
+# <!------------------------------------------------->
+# <!--                                             -->
+# <!--             Gene filtering                  -->
+# <!--                                             -->
+# <!------------------------------------------------->
+# <!-- Gene filtering can be performed via a list of sample or a regular expression based on a variable from the fData(eSet) --->
+
+
+## **Gene filtering **
+
+### Filtering on gene annotations (example with protein coding genes)
+
+
+# List of samples to keep
+genes_list <- fData(eset_GSE72540) %>%
+  dplyr::filter(Source == "protein_coding") %>%
+  dplyr::pull(GeneName)
+
+# Creation of filtered eSet options
+eset_GSE72540 <-
+  filter_features_from_values(eset = eset_GSE72540,
+                              column = "GeneName",
+                              values =   genes_list)
+```
+
+:::info
+
+On the 23800 features available in the data, 18509 genes are protein coding genes. Only protein coding genes will be included in this analysis.
+
+:::
+
+## **Data exploration**
+
+<!----------------------------------------------------->
+<!--                                                 -->
+<!--         Principal component analysis            -->
+<!--                                                 -->
+<!----------------------------------------------------->
+
+### **Principal component analysis (PCA)**{.tabset}
+  
+:::info  
+Principal component analysis (PCA) allows a representation of the samples in a low dimensional space estimated considering all genes' expressions.
+:::
+<!-- Calculate PCA   -->
+  
+```{r pca}
+pca_results <- compute_pca(eset_GSE72540)
+
+```
+
+#### Scree-plot
+
+<!-- Scree-plot (eigenvalues) -->
+
+```{r pca details, echo=FALSE, fig.height=5, fig.width=5}
+draw_pca_eigenvalues(pca_results)
+```
+
+#### PCA by Disease state
+
+```{r echo=FALSE, fig.width = 9, fig.height = 5, eval=TRUE}
+bbcViz::draw_pca_individuals(
+  eset_GSE72540,
+  pca_results,
+  col_color = "DiseaseState",
+  palette = "dark2",
+  add_ellipse = FALSE,
+  title = "PCA of the samples by Disease state",
+  interactive = TRUE, 
+  col_hover_info= c("DiseaseState", "SamplePathology", "Case" ))
+```
+
+#### PCA by Condition
+
+```{r echo=FALSE, fig.width = 7, fig.height = 5, eval=TRUE}
+bbcViz::draw_pca_individuals(
+  eset_GSE72540,
+  pca_results,
+  col_color = "Condition",
+  palette = "dark2",
+  add_ellipse = TRUE,
+  title = "PCA of the samples by Condition",
+  interactive = TRUE, 
+  col_hover_info= c("DiseaseState", "SamplePathology", "Case" ))
+```
+
+#### PCA by Sample Pathology
+
+```{r echo=FALSE, fig.width = 7, fig.height = 5}
+bbcViz::draw_pca_individuals(
+  eset_GSE72540,
+  pca_results,
+  col_color = "SamplePathology",
+  palette = "dark2",
+  add_ellipse = TRUE,
+  title = "PCA of the samples by Sample pathology",
+  interactive = TRUE,
+  col_hover_info= c("DiseaseState", "Case" )
+  )
+```
+
+:::info
+in contrast to the control group, a huge variability is observed between CSU samples condition. A difference is observed between samples according to biopsy type.
+:::
+
+## **Differential Expression analysis** {.tabset}
+
+<!--------------------------------------------------------------------------------------------->
+<!--                                                                                         -->
+<!--                            Differential Expression analysis                             -->
+<!--                                                                                         -->
+<!--------------------------------------------------------------------------------------------->
+
+
+<!-- This script performs Limma analysis                                                     -->
+<!-- It produces a tibble with, for each contrast, its table of results and table of DEGs    -->
+<!-- This tibble is then used in the following script for result exploration                 -->        
+
+<!-- Setting FC and FDR cut-offs  -->
+```{r Global variables, include=FALSE}
+t_pvalue <- 0.05
+t_FC <- 1.3
+```
+
+<!------------------------------------------->
+<!--                                       -->
+<!--         Fixed Effects Model           -->
+<!--                                       -->
+<!------------------------------------------->
+
+```{r fixed_effect_model, include=FALSE}
+# Without covariates
+model <- model.matrix( ~ 0 + SamplePathology, data = eset_GSE72540)
+colnames(model) <- c("lesional","non_lesional","normal")
+
+# Contrasts
+contr_matrix <- makeContrasts(
+  LES_vs_Norm = lesional - normal,
+  LES_vs_NLES = lesional - non_lesional,
+  no_lesional_vs_normal = non_lesional - normal,
+  levels = colnames(model)
+)
+
+# Perform differential expression analysis with Limma
+DEA_res <-
+  bbcSupervised::dea_limma(eset_object = eset_GSE72540,
+            model = model,
+            contr_matrix = contr_matrix, 
+           feature_colname = "Genes",
+           effectsize = T,
+           conf_int = T)
+
+# Add the tables of DEGs to the results
+DEA_res <- DEA_res %>% dplyr::mutate(DEgenes = purrr::map(data,
+                       ~ .x %>% subset_deg(., "FC", t_FC, "FDR", t_pvalue, order = "FC")))
+```
+
+<!--------------------------------------------------------------------------------------------->
+<!--                                                                                         -->
+<!--                                    Results Exploration                                  -->
+<!--                                                                                         -->
+<!--------------------------------------------------------------------------------------------->
+
+<!-- This script proposes several tables an graphics to describe the results                 -->
+<!-- It handles all contrasts simultaneously                                                 -->
+<!-- Results can be resented with a tab per contrast or with join plots                      -->   
+<!-- User can decide of its representation type and is encouraged to propose new ones        -->   
+
+
+<!-- Loading useful libraries --->
+```{r}
+library(purrr)
+library(knitr)
+library(flextable)
+library(ggpubr)
+library(tidyr)
+```
+
+### **Summary of DEGs (on `r nrow(DEA_res$data[[1]])` genes)** {.tabset}
+
+<!-- Creates a tab with the summary for each contrast  -->
+
+```{r, include=FALSE,results= 'asis', echo = FALSE, eval= TRUE}
+cat("\n")
+purrr::pwalk(DEA_res,
+             function(data, contrast,  ...) {
+               
+               cat(paste0("  \n#### ", contrast, " \n"))
+               cat("\n")
+               cat(knitr::knit_print(
+                 table_deg_significant(
+                   result_table = data,
+                   foldchange_column = "FC",
+                   foldchange_threshold = c(1.3, 1.5, 2),
+                   padj_column = "FDR",
+                   padj_threshold = c(0.05, 0.1, 0.2),
+                   interactive = interactive
+                 ) ))
+              })
+```
+
+:::conclusion
+
+The numebr of DEGs are higher when comparing between lesional and normal condition.
+  
+
+:::
+
+### **p-value distribution**
+
+<!-- Creates a plot with all p-value histograms -->
+
+```{r, fig.width=15, fig.height=5, fig.fullwidth=TRUE}
+pmap(DEA_res, function(data, contrast, ...) {
+  draw_pvalue_histogram(
+    data,
+    "pvalue",
+    pi0_estimate = TRUE,
+    alpha = 0.05
+  )  
+  
+})  %>% ggpubr::ggarrange(
+  plotlist = .,
+  nrow = 1,
+  labels = paste(DEA_res$contrast),
+  common.legend = T,
+  legend = "bottom",
+  vjust = 1.2
+) %>%   print()
+
+```
+
+
+### **Table of results** {.tabset}
+
+<!-- Creates a tab with the table for each contrast  -->
+
+```{r, results='asis', fig.width= 12, fig.height=8 , eval=TRUE, echo=FALSE}
+purrr::pwalk(DEA_res,
+             function(data, contrast, DEgenes, ...) {
+               cat("  \n  \n")
+               cat(paste0(
+                 "  \n#### ",
+                 contrast,
+                 " (",
+                 nrow(DEgenes),
+                 " genes differentially expressed) \n"
+               ))
+
+               # if (nrow(DEgenes) > 0) {
+                 cat("\n")
+                 cat("::::mycolumns")
+                 cat("\n")
+                 cat(":::mycolumn")
+                 cat("\n")
+                 cat(knitr::knit_print(
+                   display_table(
+                     DEgenes,
+                     interactive = TRUE,
+                     # color_shade_column = "FDR",
+                     bar_column = c("FDR","FC"),
+                     highlighted_row = FC > 10 | FC < -10,
+                     highlighted_color = "lightblue",
+                     nmax_display = 10
+                   )
+                 ))
+
+                 cat("\n")
+                 cat(":::")
+                 cat("\n")
+                 cat("::::")
+                 cat("\n")
+               # }
+               cat("\n")
+
+             })
+
+```
+
+### **Table of results for all contrasts** 
+
+<!-- Creates a table of results for all contrasts  -->
+
+::::mycolumns
+
+:::mycolumn
+
+```{r}
+# Create a result table with different contrasts dysplayed in columns
+fulltable <-
+  DEA_res %>% dplyr::select(contrast, data) %>% tidyr::unnest() %>%
+  tidyr::pivot_wider(
+    id_cols = "Genes",
+    names_from = "contrast",
+    values_from = c("FC", "FDR")
+  )
+
+display_table(
+  fulltable,
+  interactive = TRUE,
+  # color_shade_column = "FDR",
+  bar_column = paste0("FC_", DEA_res$contrast),
+  highlighted_color = "yellow",
+  nmax_display = 10
+)
+```
+
+:::
+
+::::
+
+###
+
+
+### **Volcano plots** {.tabset}
+
+<!-- Creates a tab with the plot for each contrast  -->
+
+```{r, results='asis', fig.width= 8, fig.height=6}
+purrr::pwalk(DEA_res,
+             function(data, contrast, ...) {
+               cat(paste0("  \n#### ", contrast , "  \n"))
+               bbcViz::draw_volcano(
+                 data = data,
+                 col_log2fc = "log2FC",
+                 col_signif = "pvalue",
+                 col_label = "Genes",
+                 fc_cutoff = 1.3,
+                 signif_cutoff = 0.10,
+                 type = c("pv"),
+                 # labelled = data %>% pull(Gene) %>% head(100),
+                 # focused = c("C1QA", "C1QB", "C1QC"),
+                 shape = c(17, 1, 16),
+                 alpha = c(0.9, 0.4, 0.7),
+                 size = c(5, 2, 2),
+                 color = c("darkred",  "#1F78B4", "darkgreen", "grey40"), 
+                 # legend = TRUE
+               )   %>% print()
+               cat("\n")
+               
+             })
+
+  
+```
+
+
+### **Heatmap of DEG genes**  {.tabset}
+
+```{r fig.height=7, fig.width=12}
+# Select a contrast
+# DEA_res_ <- DEA_res %>% filter(contrast == "kidney_antiOX40_vs_CT" )
+# Select gene list for heatmap
+gene_list = DEA_res$DEgenes %>% purrr::map( ~ .x) %>% bind_rows()  %>%  pull(Genes)
+
+# eset_GSE72540_CSU <- filter_samples_from_values(eset_GSE72540, column = "Condition",
+#                             values = c("CSU"))
+# Plot
+bbcViz::draw_heatmap(
+  filter_features_from_values(
+    eset_GSE72540,
+    values = gene_list,
+    column = "GeneName"
+  ),
+  column_annotation_names = c("Condition", "SamplePathology","DiseaseState"),
+  column_palette_selection = c("dark2", "nejm", "jco"),
+  column_split = "SamplePathology" ,
+  show_row_names = FALSE,
+  name = "Exprs",
+  scale_data = TRUE,
+    column_title = "Heatmap of expression for DEGs", 
+  interactive = FALSE
+)
+```
+
+
+:::conclusion
+
+:::
+
+
+### **Gene visualization**
+
+#### **Box plots top 10 Up-regulated DEG** {.tabset}
+
+<!-- Creates a tab with the plots for each contrast  -->
+
+```{r, results='asis', fig.width=12, fig.height=8 , warnings = FALSE}
+purrr::pwalk(DEA_res,
+             function(DEgenes, contrasts, ...) {
+               cat("  \n  \n")
+               cat(paste0("  \n##### ",
+                          contrasts,
+                          "\n"))
+               if (nrow(DEgenes) > 0) {
+                 boxplottop20 <-
+                   purrr::map(
+                     DEgenes %>% filter(FC > 0) %>% slice_max(FC, n = 10) %>% pull(Genes),
+                     ~
+                       bbcViz::draw_boxplot((
+                         eset_GSE72540 %>% filter_features_from_values(values = .x, column = "GeneName")
+                       ),
+                       col_x = "SamplePathology",
+                       col_y = .x,
+                       col_color = "SamplePathology",
+                       # y_transformation  = ~log2(. + 1),
+                       palette  = "dark2",
+                       # hline_threshold  = log2(esti_tpm + 1),
+                       title = .x,
+                       add_point = "jitter_on_x"
+                       ) +
+                       rotate_x_text(angle = 45) +
+                       labs(
+                         y = fData(eset_GSE72540) %>% filter(GeneName == .x) 
+                       )
+                   ) %>% ggpubr::ggarrange(
+                     plotlist = .,
+                     nrow = ifelse(nrow(DEgenes) < 5, 1, 2),
+                     ncol = min(5, nrow(DEgenes)),
+                     common.legend = TRUE,
+                     legend = "bottom"
+                   ) %>%   print()
+                 cat("\n")
+                 
+               }
+               cat("\n")
+             })
+```
+
+
+
+#### **Box plots top 10 Down-regulated DEG** {.tabset}
+
+<!-- Creates a tab with the plots for each contrast  -->
+
+```{r, fig.height=8, fig.width=12, results='asis', warnings=FALSE}
+purrr::pwalk(DEA_res,
+             function(DEgenes, contrasts, ...) {
+               cat("  \n  \n")
+               cat(paste0("  \n##### ",
+                          contrasts,
+                          "\n"))
+               if (nrow(DEgenes) > 0) {
+                 boxplottop20 <-
+                   purrr::map(
+                     DEgenes %>% filter(FC < 0) %>% slice_min(FC, n = 10) %>% pull(Genes),
+                     ~
+                       bbcViz::draw_boxplot((
+                         eset_GSE72540 %>% filter_features_from_values(values = .x, column = "GeneName")
+                       ),
+                       col_x = "SamplePathology",
+                       col_y = .x,
+                       col_color = "SamplePathology",
+                       # y_transformation  = ~log2(. + 1),
+                       palette  = "dark2",
+                       # hline_threshold  = log2(esti_tpm + 1),
+                       title = .x,
+                       add_point = "jitter_on_x"
+                       ) +
+                       rotate_x_text(angle = 45) +
+                       labs(
+                         y = fData(eset_GSE72540) %>% filter(GeneName == .x)
+                       )
+                   )  %>% ggpubr::ggarrange(
+                     plotlist = .,
+                     nrow = 2,
+                     ncol = 5,
+                     common.legend = TRUE,
+                     legend = "bottom"
+                   ) %>%   print()
+                 cat("\n")
+               }
+               cat("\n")
+             })
+```
+
+<!--------------------------------------------------------------------------------------------->
+<!--                                                                                         -->
+<!--                                    Contrasts Comparison                                 -->
+<!--                                                                                         -->
+<!--------------------------------------------------------------------------------------------->
+
+
+<!-- Loading useful libraries --->
+
+```{r}
+library(venn)
+library(viridis)
+library(flextable)
+library(ComplexUpset)
+library(PCGSE)
+```
+
+## **CSU vs Control condition: contrast comparison** {.tabset}
+
+Here we compare the number of DEGs between the three comparisons.
+
+
+### **Venn diagram**
+
+```{r, fig.width = 5, fig.height = 6}
+
+# Creates a named list with all contrasts
+list_venn <- pmap(DEA_res, function(DEgenes, ...) {
+  DEgenes %>% pull(Genes)
+})
+
+names(list_venn) <- DEA_res$contrast
+
+# Ven diagram
+NBC = length(list_venn) %>% viridis()
+venn::venn(list_venn, zcolor = "style")
+
+```
+
+```{r include=FALSE}
+library(gplots)
+v.table <- venn(list_venn)
+print(v.table)
+intersections<-attr(v.table,"intersections")
+```
+
+
+```{r}
+venn(list_venn)
+```
+
+### **Venn: Intersections list**
+```{r}
+print(intersections)
+```
+
+:::conclusion
+
+4 genes are in common between the three comparisons and 312 genes are in common when comparing the lesional versus non-biopsy and normal biopsies.
+
+:::
+
+### **Data plot**
+
+```{r, fig.width = 7, fig.height = 5, eval = TRUE}
+## **Advanced upset plot**
+dataplot <- binary_membership(list_venn, elt_name = "Genes")
+
+upset(dataplot, colnames(dataplot)[-1])
+
+```
+
+### **Fold-change concordance plot**
+
+```{r, results='asis', fig.width = 8, fig.height = 9}
+common_genes_between_normal_NLS_vs_LS <- intersections$`lesional_vs_normal:lesional_vs_non_lesional`
+# Creates a list of all unique pairs of contrasts
+list_contrast <- combn(DEA_res$contrast, 2) %>% t()
+
+# Creates a tab with the plot for each contrast comparison
+
+walk2(list_contrast[, 1], list_contrast[, 2],
+      function(.x, .y) {
+        cat(paste0(" \n### ", .x, "_VS_", .y, " \n"))
+        
+        plot_concord(
+          res1 = DEA_res %>% filter(contrast == .x) %>% pull(data) %>% data.frame,
+          res2 = DEA_res %>% filter(contrast == .y) %>% pull(data) %>% data.frame,
+          title = "Concordance of FC",
+          contrast_feature = c("Genes", "Genes"),
+          contrast_names = c(.x, .y),
+          contrast_to_display = c("log2FC", "log2FC"),
+          contrast_to_display_name = c("log2FC", "log2FC"),
+          contrast_fc = c("log2FC", "log2FC"),
+          contrast_fdr = c("FDR", "FDR"),
+          t_fc = log2(1.3),
+          t_pv = 0.05,
+          feature_list = union(
+            DEA_res %>% filter(contrast == .x) %>% pull(data) %>% data.frame %>% pull(Genes),
+            DEA_res %>% filter(contrast == .y) %>% pull(data) %>% data.frame %>% pull(Genes)
+          ),
+          nfeature_to_display = 20,
+          # interest_feature_list = common_genes_between_normal_NLS_vs_LS,
+          interactive = FALSE
+        ) %>% print
+               cat("\n")
+      })
+```
+
+
+### **Heatmap of deregulated common genes** 
+
+```{r fig.height=9, fig.width=12}
+
+common_genes_between_normal_NLS_vs_LS <- intersections$`LES_vs_Norm:LES_vs_NLES`
+data_genes_common <- filter_features_from_expr(eset_GSE72540, fData(eset_GSE72540)$GeneName %in% common_genes_between_normal_NLS_vs_LS)
+
+row_labels <- paste0(fData(data_genes_common)$GeneName)
+
+bbcViz::draw_heatmap(
+  
+    data_genes_common,
+  
+  column_annotation_names = c("Condition", "SamplePathology", "DiseaseState"),
+  column_palette_selection = c("dark2","nejm","jco"),
+  column_split = "SamplePathology",
+  # row_split = "Signature",
+  row_title_rot = 0,
+  row_gap = unit(1, "mm"),
+  row_names_side = "right", 
+  # row_names_gp = gpar(fontsize = c(10, 14)),
+  # row_names_gp = grid::gpar(fontsize = 5),
+  row_names_gp = gpar(fontsize = 7),
+  # row_title_gp = gpar(fontsize = 8),
+  row_title_side = "left",
+  border = TRUE,
+  # row_title = "I am a row title",
+  show_row_names = FALSE,
+  # row_labels = row_labels,
+  name = "Exprs",
+  scale_data = TRUE,
+    column_title = "Heatmap of expression of selected genes", 
+  row_dend_reorder = TRUE,
+  interactive = FALSE
+)
+```
