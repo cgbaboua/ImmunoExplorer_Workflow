@@ -8,16 +8,6 @@ output: html_document
 # **GSE72540 Analysis**
 
 ## **WGCNA w/ all DEG**
-### **Dataset description**
-:::info
-+ Title: Gene expression profile of patients with moderate and severe chronic spontaneous urticaria [tissue].
-+ Submission date: Public on Apr 19, 2017
-+ Overall design: A total of 20 patients suffering of moderate and severe CSU/CIU and 10 healthy control subjects were included.
-+ Experiment type: Microarray
-+ Platform: GPL16699	Agilent-039494 SurePrint G3 Human GE v2 8x60K Microarray 039381 (Feature Number version)
-+ Number of genes: 18497 genes
-+ Citation: Giménez-Arnau A, Curto-Barredo L, Nonell L, Puigdecanet E et al. Transcriptome analysis of severely active chronic spontaneous urticaria shows an overall immunological skin involvement. Allergy 2017 Nov;72(11):1778-1790. PMID: 28407332
-:::
 
 <!-- Purge de l'environnement --->
 
