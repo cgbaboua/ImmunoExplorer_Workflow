@@ -1,0 +1,631 @@
+---
+title: "WGCNA_GSE72540"
+author: "Casandra GBABOUA"
+date: "2024-03-05"
+output: html_document
+---
+
+# **GSE72540 Analysis**
+
+## **WGCNA w/ all DEG**
+### **Dataset description**
+:::info
++ Title: Gene expression profile of patients with moderate and severe chronic spontaneous urticaria [tissue].
++ Submission date: Public on Apr 19, 2017
++ Overall design: A total of 20 patients suffering of moderate and severe CSU/CIU and 10 healthy control subjects were included.
++ Experiment type: Microarray
++ Platform: GPL16699	Agilent-039494 SurePrint G3 Human GE v2 8x60K Microarray 039381 (Feature Number version)
++ Number of genes: 18497 genes
++ Citation: Giménez-Arnau A, Curto-Barredo L, Nonell L, Puigdecanet E et al. Transcriptome analysis of severely active chronic spontaneous urticaria shows an overall immunological skin involvement. Allergy 2017 Nov;72(11):1778-1790. PMID: 28407332
+:::
+
+<!-- Purge de l'environnement --->
+
+```{r}
+rm(list=ls())
+```
+
+<!-- Chargement et téléchargement de la biblio -->
+
+```{r}
+#BiocManager::install("WGCNA")
+#devtools::install_github("kevinblighe/CorLevelPlot")
+library(DESeq2)
+library(GEOquery)
+library(tidyverse)
+library(CorLevelPlot)
+library(gridExtra)
+library(bbcViz)
+library(WGCNA)
+library(DT)
+```
+
+<!-- Chargement du eSet -->
+
+```{r}
+eset_file <- "GSE72540_eset.rds"
+data <- read_rds(sprintf("/home/DA82_SUR/Internship_data/CSU/eSet/%s",eset_file))
+```
+
+<!-- Chargement du/des DEG (expression) -->
+
+```{r}
+DEG_exprs <- "DEG_expression_GSE72540.csv"
+exprs_data <- read.csv(sprintf("/home/DA82_SUR/Internship_data/CSU/WGCNA/forWGCNA/%s",DEG_exprs))
+rownames(exprs_data) <- exprs_data$X
+exprs_data$X <- NULL
+```
+
+<!-- Open functions -->
+
+```{r}
+save_data <- T
+source("~/Internship_data/CSU/wgcna_functions.R")
+```
+
+### **Visualization of input data**
+
+:::info
+Voici un extrait de la matrice d'expression sur laquelle nous lançons WGCNA (8 premières lignes et les 5 premières colonnes). Elle sera transposée au préalable pour pouvoir être utilisée dans l'algorithme.
+:::
+  
+```{r}
+# Convertir la matrice d'expression en data.frame pour une utilisation avec DT
+expression_df <- as.data.frame(exprs_data)
+
+# Use DT::datatable() to create an interactive table
+createTable(expression_df[1:8,1:5])
+```
+
+<!-- Transposition de la matrice pour avoir les gènes en variables -->
+  
+:::info
+Voici un extrait de la matrice transposée (5 premières lignes et 8 premières colonnes).
+:::
+
+```{r}
+input_mat <- t(exprs_data)
+input_mat <- as.data.frame(input_mat)
+createTable(input_mat[1:5,1:8])         # Look at first 5 rows and 10 columns
+```
+
+<!-- Récupération des données de maladies des patients -->
+  
+```{r}
+sample_status <-pData(data)[c("SamplePathology","DiseaseState","SampleID")]
+sample_status$DiseaseState <- ifelse(sample_status$SamplePathology == "non-lesional" | sample_status$SamplePathology == "normal", "HC", sample_status$DiseaseState)
+sample_status$DiseaseState <- ifelse(sample_status$DiseaseState != "HC", "CSU", sample_status$DiseaseState)
+sample_status$SamplePathology <- NULL
+
+```
+
+<!-- Récupération des données de FC, p-value, ... -->
+  
+```{r}
+DEA_data <- read.csv("/home/DA82_SUR/Internship_data/CSU/WGCNA/forWGCNA/DEG_GSE72540.csv")
+DEA_FC <- DEA_data[c("Genes","FC")]
+```
+
+### **Pick threshold**{.tabset}
+
+```{r include=FALSE}
+allowWGCNAThreads()   # allow multi-threading (optional)
+```
+
+#### **Table of powers**{.tabset}
+
+##### Unsigned
+```{r,include=FALSE}
+#Set network type
+netwk_type_unsigned = "unsigned"
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to = 50, by = 2))
+sft_data_unsigned <- pickThresholdAndPlot(netwk_type_unsigned,0)
+```
+
+```{r}
+createTable(sft_data_unsigned)
+```
+
+##### Signed
+```{r,include=FALSE}
+#Set network type
+netwk_type_signed = "signed"
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to = 50, by = 2))
+sft_data_signed <- pickThresholdAndPlot(netwk_type_signed,0)
+```
+
+```{r}
+createTable(sft_data_signed)
+```
+
+##### Signed hybrid
+```{r,include=FALSE}
+#Set network type
+netwk_type_shybrid= "signed hybrid"
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to = 50, by = 2))
+sft_data_shybrid <- pickThresholdAndPlot(netwk_type_shybrid,0)
+```
+
+```{r}
+createTable(sft_data_shybrid)
+```
+
+#### **Sclale Independence and Mean Connectivity Plots**{.tabset}
+
+##### Unsigned
+```{r}
+PlotsAndArrange(sft_data_unsigned)
+```
+
+##### Signed
+
+```{r}
+PlotsAndArrange(sft_data_signed)
+```
+
+##### Signed hybrid
+
+```{r}
+PlotsAndArrange(sft_data_shybrid)
+```
+
+```{r,echo=FALSE}
+# Network Construction and Module Detection
+picked_power_unsigned = determineOptimalPower(sft_data_unsigned,0.8)
+netwk_unsigned <- constructNetworkAndDetectModules(netwk_type_unsigned,picked_power_unsigned,0)
+```
+
+```{r,echo=FALSE}
+# Network Construction and Module Detection
+picked_power_signed = determineOptimalPower(sft_data_signed,0.8)
+netwk_signed <- constructNetworkAndDetectModules(netwk_type_signed,picked_power_signed,0)
+```
+
+```{r,echo=FALSE}
+# Network Construction and Module Detection
+picked_power_shybrid = determineOptimalPower(sft_data_shybrid,0.8)
+netwk_shybrid <- constructNetworkAndDetectModules(netwk_type_shybrid,picked_power_shybrid,0)
+```
+
+### **Module Visualization** {.tabset}
+
+#### Unsigned
+:::info
+Let's take a look at the modules, there
+:::
+```{r, fig.width=8, fig.height=4}
+visualizeModules(netwk_unsigned)
+```
+
+#### Signed
+:::info
+Let's take a look at the modules, there
+:::
+```{r, fig.width=8, fig.height=4}
+visualizeModules(netwk_signed)
+```
+
+#### Signed hybrid
+:::info
+Let's take a look at the modules, there
+:::
+```{r, fig.width=8, fig.height=4}
+visualizeModules(netwk_shybrid)
+```
+
+### **Relate Module (cluster) Assignments to Sample** {.tabset}
+
+#### **List of Module associate to Fold Change** {.tabset}
+
+##### Unsigned
+
+```{r}
+#We can pull out the list of modules
+module_df_unsigned <- relateModulesToTraits(netwk_unsigned)
+```
+
+:::info
+Nous pouvons vérifier quels gènes sont présents dans quels modules et le FC associé au gène.
+:::
+
+```{r}
+createTable(mergeFCWithModuleData(module_df_unsigned,DEA_FC))
+```
+
+##### Signed
+
+```{r}
+#We can pull out the list of modules
+module_df_signed <- relateModulesToTraits(netwk_signed)
+```
+
+:::info
+Nous pouvons vérifier quels gènes sont présents dans quels modules et le FC associé au gène.
+:::
+
+```{r}
+createTable(mergeFCWithModuleData(module_df_signed,DEA_FC))
+```
+
+##### Signed hybrid
+
+```{r}
+#We can pull out the list of modules
+module_df_shybrid <- relateModulesToTraits(netwk_shybrid)
+```
+
+:::info
+Nous pouvons vérifier quels gènes sont présents dans quels modules et le FC associé au gène.
+:::
+
+```{r}
+createTable(mergeFCWithModuleData(module_df_shybrid,DEA_FC))
+```
+
+#### **Summarize number of modules and genes** {.tabset}
+
+##### Unsigned
+:::info
+Verifions combien de modules et combien de gènes on compte.
+:::
+```{r}
+createTable(summarizeModuleData(module_df_unsigned))
+#moduleSummary
+#length(moduleSummary[,1])
+
+```
+
+##### Signed
+:::info
+Verifions combien de modules et combien de gènes on compte.
+:::
+```{r}
+createTable(summarizeModuleData(module_df_signed))
+#moduleSummary
+#length(moduleSummary[,1])
+
+```
+
+##### Signed hybrid
+:::info
+Verifions combien de modules et combien de gènes on compte.
+:::
+```{r}
+createTable(summarizeModuleData(module_df_shybrid))
+#moduleSummary
+#length(moduleSummary[,1])
+
+```
+
+#### **Heatmap of module and sample relationships** {.tabset}
+
+##### Unsigned
+:::info
+We have written out a tab delimited file listing the genes and their modules. However, we need to figure out which modules are associated with each trait/treatment group. WGCNA will calcuate an Eigangene (hypothetical central gene) for each module, so it easier to determine if modules are associated with different treatments.
+:::
+```{r, fig.width=7, fig.height=8}
+plotModuleTraitRelationships(input_mat,netwk_unsigned,sample_status,x = "treatment",y = "SampleID")$plot
+```
+
+```{r}
+#Vérifier la liste des gènes par modules
+list_of_modules_unsigned <- listOfModules(module_df_unsigned)
+```
+
+##### Signed
+:::info
+We have written out a tab delimited file listing the genes and their modules. However, we need to figure out which modules are associated with each trait/treatment group. WGCNA will calcuate an Eigangene (hypothetical central gene) for each module, so it easier to determine if modules are associated with different treatments.
+:::
+```{r, fig.width=7, fig.height=8}
+plotModuleTraitRelationships(input_mat,netwk_signed,sample_status,x = "treatment",y = "SampleID")$plot
+```
+
+```{r,include=F}
+# if(save_data){
+#   write_rds(plotModuleTraitRelationships(input_mat,netwk_signed,sample_status,x = "treatment",y = "SampleID")$MEs,"~/Internship_data/CSU/Correlation/WGCNA_GSE72540_data_corr.rds")
+# }
+```
+
+```{r}
+#Vérifier la liste des gènes par modules
+list_of_modules_signed <- listOfModules(module_df_signed)
+```
+
+##### Signed hybrid
+:::info
+We have written out a tab delimited file listing the genes and their modules. However, we need to figure out which modules are associated with each trait/treatment group. WGCNA will calcuate an Eigangene (hypothetical central gene) for each module, so it easier to determine if modules are associated with different treatments.
+:::
+```{r, fig.width=7, fig.height=8}
+plotModuleTraitRelationships(input_mat,netwk_shybrid,sample_status,x = "treatment",y = "SampleID")$plot
+```
+
+```{r}
+#Vérifier la liste des gènes par modules
+list_of_modules_shybrid <- listOfModules(module_df_shybrid)
+```
+
+### **See modules of our genes of interest** {.tabset}
+
+#### Unsigned
+
+```{r, fig.width=20, fig.height=9}
+# Examine Expression Profiles
+
+#We'll pick out a few modules of interest, and plot their expression profiles 
+#To do the choice we will pick modules in which our genes of interest are 
+
+genes_of_interest <- c("TNFRSF4","CD40","CXCR3","CXCR4","BCL2A1","IL21R","TIGIT")
+
+# Utiliser la fonction et stocker le résultat dans un data frame
+genes_in_modules_df_unsigned <- group_genes_by_module(genes_of_interest, list_of_modules_unsigned)
+
+# Afficher le résultat
+createTable(genes_in_modules_df_unsigned)
+```
+
+#### Signed
+
+```{r, fig.width=20, fig.height=9}
+# Examine Expression Profiles
+
+#We'll pick out a few modules of interest, and plot their expression profiles 
+#To do the choice we will pick modules in which our genes of interest are 
+
+genes_of_interest <- c("TNFRSF4","CD40","CXCR3","CXCR4","BCL2A1","IL21R","TIGIT")
+
+# Utiliser la fonction et stocker le résultat dans un data frame
+genes_in_modules_df_signed <- group_genes_by_module(genes_of_interest, list_of_modules_signed)
+
+# Afficher le résultat
+createTable(genes_in_modules_df_signed)
+```
+
+#### Signed hybrid
+
+```{r, fig.width=20, fig.height=9}
+# Examine Expression Profiles
+
+#We'll pick out a few modules of interest, and plot their expression profiles 
+#To do the choice we will pick modules in which our genes of interest are 
+
+genes_of_interest <- c("TNFRSF4","CD40","CXCR3","CXCR4","BCL2A1","IL21R","TIGIT")
+
+# Utiliser la fonction et stocker le résultat dans un data frame
+genes_in_modules_df_shybrid <- group_genes_by_module(genes_of_interest, list_of_modules_shybrid)
+
+# Afficher le résultat
+createTable(genes_in_modules_df_shybrid)
+```
+
+### **Examine profiles of modules**{.tabset}
+
+#### Unsigned
+
+```{r}
+# pick out a few modules of interest here
+modules_of_interest_unsigned <- c("turquoise", "blue","grey","brown",genes_in_modules_df_unsigned$module)
+modules_of_interest_unsigned <- unique(modules_of_interest_unsigned)
+
+# Pull out list of genes in that module
+submod_unsigned = module_df_unsigned %>%
+  subset(colors %in% modules_of_interest_unsigned)
+
+row.names(module_df_unsigned) = module_df_unsigned$gene_id
+
+#Examine profiles
+examineExpressionProfiles(submod_unsigned,module_df_unsigned)
+```
+
+#### Signed
+
+```{r}
+# pick out a few modules of interest here
+modules_of_interest_signed <- c("turquoise", "blue","grey","brown",genes_in_modules_df_signed$module)
+modules_of_interest_signed <- unique(modules_of_interest_signed)
+
+# Pull out list of genes in that module
+submod_signed= module_df_signed %>%
+  subset(colors %in% modules_of_interest_signed)
+
+row.names(module_df_signed) = module_df_signed$gene_id
+
+#Examine profiles
+examineExpressionProfiles(submod_signed,module_df_signed)
+
+```
+
+#### Signed hybrid
+
+```{r}
+# pick out a few modules of interest here
+modules_of_interest_shybrid <- c("turquoise", "blue","grey","brown",genes_in_modules_df_shybrid$module)
+modules_of_interest_shybrid <- unique(modules_of_interest_shybrid)
+
+# Pull out list of genes in that module
+submod_shybrid = module_df_shybrid %>%
+  subset(colors %in% modules_of_interest_shybrid)
+
+row.names(module_df_shybrid) = module_df_shybrid$gene_id
+
+#Examine profiles
+examineExpressionProfiles(submod_shybrid,module_df_shybrid)
+
+```
+
+### **Find hub genes for each modules**{.tabset}
+
+#### Unsigned
+```{r,echo=F}
+top_hub_genes_unsigned <- chooseTopHubGenes(list_of_modules_unsigned, input_mat, picked_power_unsigned, netwk_type_unsigned,"grey")
+
+# Afficher les gènes hub dans une table
+hub_genes_df_unsigned <- data.frame(Module = character(), HubGene = character(), stringsAsFactors = FALSE)
+for (module in names(top_hub_genes_unsigned)) {
+  hub_genes <- top_hub_genes_unsigned[[module]]
+  if (length(hub_genes) > 0) {
+    for (gene in hub_genes) {
+      hub_genes_df_unsigned <- rbind(hub_genes_df_unsigned, data.frame(Module = module, HubGene = gene))
+    }
+  }
+}
+createTable(hub_genes_df_unsigned)
+```
+
+#### Signed
+```{r,echo=F}
+top_hub_genes_signed <- chooseTopHubGenes(list_of_modules_signed, input_mat, picked_power_signed, netwk_type_signed,"grey")
+
+# Afficher les gènes hub dans une table
+hub_genes_df_signed <- data.frame(Module = character(), HubGene = character(), stringsAsFactors = FALSE)
+for (module in names(top_hub_genes_signed)) {
+  hub_genes <- top_hub_genes_signed[[module]]
+  if (length(hub_genes) > 0) {
+    for (gene in hub_genes) {
+      hub_genes_df_signed <- rbind(hub_genes_df_signed, data.frame(Module = module, HubGene = gene))
+    }
+  }
+}
+createTable(hub_genes_df_signed)
+```
+
+#### Signed hybrid
+```{r,echo=F}
+top_hub_genes_shybrid <- chooseTopHubGenes(list_of_modules_shybrid, input_mat, picked_power_shybrid, netwk_type_shybrid,"grey")
+
+# Afficher les gènes hub dans une table
+hub_genes_df_shybrid <- data.frame(Module = character(), HubGene = character(), stringsAsFactors = FALSE)
+for (module in names(top_hub_genes_shybrid)) {
+  hub_genes <- top_hub_genes_shybrid[[module]]
+  if (length(hub_genes) > 0) {
+    for (gene in hub_genes) {
+      hub_genes_df_shybrid <- rbind(hub_genes_df_shybrid, data.frame(Module = module, HubGene = gene))
+    }
+  }
+}
+createTable(hub_genes_df_shybrid)
+```
+
+
+### **Display edge list with correlation values**{.tabset}
+
+#### Unsigned
+
+```{r,include=FALSE}
+genes_of_interest_unsigned = module_df_unsigned %>%
+  subset(colors %in% modules_of_interest_unsigned)
+
+expr_of_interest_unsigned = exprs_data[genes_of_interest_unsigned$gene_id,]
+
+
+# Recalculate TOM for modules of interest 
+list_unsigned <- calculateTOMandEdgeList(module_df_unsigned,picked_power_unsigned,modules_of_interest_unsigned)
+
+edge_list_unsigned <- list_unsigned$edge_list
+TOM_unsigned <- as.data.frame.matrix(list_unsigned$TOM)
+
+writeEdgeList(eset_file,netwk_type_unsigned,edge_list_unsigned)
+
+
+
+# Boucle pour générer et enregistrer les edge lists pour chaque module
+for (module in unique(module_df_unsigned$colors)) {
+  # Filtrer l'edge list pour un module spécifique
+  edge_list_filtered_unsigned <- edge_list_unsigned %>%
+    dplyr::filter(module1 == module & module2 == module)
+  
+  # Sauvegarder l'edge list filtrée dans un fichier
+  writeEdgeListForModule(edge_list_filtered_unsigned, module, netwk_type_unsigned, eset_file)
+}
+```
+:::info
+Voici un extrait de la liste des corrélations entre gènes
+:::
+```{r}
+createTable(edge_list_unsigned[1:2000,])
+```
+
+#### Signed
+
+```{r,include=FALSE}
+genes_of_interest_signed = module_df_signed %>%
+  subset(colors %in% modules_of_interest_signed)
+
+expr_of_interest_signed = exprs_data[genes_of_interest_signed$gene_id,]
+
+# Recalculate TOM for modules of interest 
+list_signed <- calculateTOMandEdgeList(module_df_signed,picked_power_signed,modules_of_interest_signed)
+
+edge_list_signed <- list_signed$edge_list
+TOM_signed <- as.data.frame(list_signed$TOM)
+
+writeEdgeList(eset_file,netwk_type_signed,edge_list_signed)
+
+
+# Boucle pour générer et enregistrer les edge lists pour chaque module
+for (module in unique(module_df_signed$colors)) {
+  # Filtrer l'edge list pour un module spécifique
+  edge_list_filtered_signed <- edge_list_signed %>%
+    dplyr::filter(module1 == module & module2 == module)
+  
+  # Sauvegarder l'edge list filtrée dans un fichier
+  writeEdgeListForModule(edge_list_filtered_signed, module, netwk_type_signed, eset_file)
+}
+```
+
+:::info
+Voici un extrait de la liste des corrélations entre gènes
+:::
+```{r}
+createTable(edge_list_signed[1:2000,])
+```
+
+
+#### Signed hybrid
+
+```{r,include=FALSE}
+genes_of_interest_shybrid = module_df_shybrid %>%
+  subset(colors %in% modules_of_interest_shybrid)
+
+expr_of_interest_shybrid = exprs_data[genes_of_interest_shybrid$gene_id,]
+
+# Recalculate TOM for modules of interest 
+list_shybrid <- calculateTOMandEdgeList(module_df_shybrid,picked_power_shybrid,modules_of_interest_shybrid)
+
+edge_list_shybrid <- list_shybrid$edge_list
+TOM_shybrid <- as.data.frame(list_shybrid$TOM)
+
+writeEdgeList(eset_file,netwk_type_shybrid,edge_list_shybrid)
+
+
+# Boucle pour générer et enregistrer les edge lists pour chaque module
+for (module in unique(module_df_shybrid$colors)) {
+  # Filtrer l'edge list pour un module spécifique
+  edge_list_filtered_shybrid <- edge_list_shybrid %>%
+    dplyr::filter(module1 == module & module2 == module)
+  
+  # Sauvegarder l'edge list filtrée dans un fichier
+  writeEdgeListForModule(edge_list_filtered_shybrid, module, netwk_type_shybrid, eset_file)
+}
+
+```
+
+:::info
+Voici un extrait de la liste des corrélations entre gènes
+:::
+```{r}
+createTable(edge_list_shybrid[1:2000,])
+```
+
+```{r,include=F}
+# Save module for Lasso Regression
+turquoise_module_GSE72540 <- rownames(module_df_signed[which(module_df_signed$colors=="turquoise"),])
+blue_module_GSE72540 <- rownames(module_df_signed[which(module_df_signed$colors=="blue"),])
+grey_module_GSE72540 <- rownames(module_df_signed[which(module_df_signed$colors=="grey"),])
+brown_module_GSE72540 <- rownames(module_df_signed[which(module_df_signed$colors=="brown"),])
+
+
+save(turquoise_module_GSE72540,blue_module_GSE72540,file="modules_list_GSE72540.RData")
+```
