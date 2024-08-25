@@ -1,0 +1,614 @@
+## **Correlation**{.tabset}
+
+:::info
+Unlike the WGCNA analysis and the rest, for the correlations we have decided not to filter the samples to avoid having too little information.
+:::
+
+```{r,include=F}
+eset_file <- "GSE72540_eset.rds"
+data <- readRDS(sprintf("/home/DA82_SUR/Internship_data/CSU/eSet/%s",eset_file))
+```
+
+```{r,include=F}
+#Charger les données d'expressions
+# # To take all DEG genes for RWR :
+# expression_GSE <- read.csv("~/Internship_data/CSU/WGCNA/forWGCNA/DEG_expression_GSE72540_2.csv")
+# rownames(expression_GSE) <- expression_GSE$X
+# expression_GSE$X <- NULL
+expression_GSE <- Biobase::exprs(data)
+```
+
+```{r,include=F}
+#Les gènes d'intérets
+genes_of_interest <- c("TNFRSF4","PMM2","CD40","JUNB","SOCS3","S100A9","S100A12","S100A8")
+```
+
+```{r,include=F}
+info_of_interest <- c("SampleID","SamplePathology","Treatment","Gender","Urticaria_severity","AntiH1_x1.R","CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7")
+clinical_info <- pData(data)
+
+# Garder seulement les infos qui nous intéressent
+clinical_info <- clinical_info[,info_of_interest]
+```
+
+```{r,include=FALSE}
+expression_info <- as.data.frame(expression_GSE)
+expression_info <- tibble::rownames_to_column(expression_info, "Genes")
+
+#transpose data frame
+expression_info_t <- data.table::transpose(expression_info)
+
+#redefine row and column names
+colnames(expression_info_t) <- expression_info$Genes
+rownames(expression_info_t) <- colnames(expression_info)
+expression_info_t <- tibble::rownames_to_column(expression_info_t, "SampleID")
+expression_info_t <- expression_info_t[-1,]
+```
+
+```{r,include=FALSE}
+csu_corr_table =dplyr::left_join(
+  clinical_info,
+  expression_info_t,
+  by = "SampleID"
+)
+
+# Direct transformation of 'Yes' in 1 and 'No' in 0
+csu_corr_table$ASST <- ifelse(csu_corr_table$ASST == "Yes", 1, 0)
+
+# Direct transformation of 'Yes' in 1 and 'No' in 0
+csu_corr_table$AntiH1_x4.R <- ifelse(csu_corr_table$AntiH1_x4.R == "Yes", 1,
+                                     ifelse(csu_corr_table$AntiH1_x4.R == "No", 0, 
+                                            csu_corr_table$AntiH1_x4.R))
+# Direct transformation of 'Yes' in 1 and 'No' in 0
+csu_corr_table$CsA.R <- ifelse(csu_corr_table$CsA.R == "Yes", 1,
+                                     ifelse(csu_corr_table$CsA.R == "No", 0, 
+                                            csu_corr_table$CsA.R))
+  
+csu_corr_table[, 6:ncol(csu_corr_table)] <- apply(csu_corr_table[, 6:ncol(csu_corr_table)], 2, as.numeric)
+```
+
+### Correlation: corrplot
+
+```{r,include=FALSE}
+csu_corr_table_corplot <- csu_corr_table %>% dplyr::select(c("CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7", all_of(genes_of_interest)))
+                                                         
+# csu_corr_table_corplot_2 <- csu_corr_table %>% dplyr::select(c("CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7", all_of(rownames(expression_GSE))
+
+# Compute the correlation matrix
+cor_matrix <- cor(csu_corr_table_corplot, use = "pairwise.complete.obs")
+
+# # Transform in edge list
+# edge_list <- data.frame(
+#   from = rep(rownames(cor_matrix), times = ncol(cor_matrix)),
+#   to = rep(colnames(cor_matrix), each = nrow(cor_matrix)),
+#   weight = as.vector(cor_matrix)
+# )
+# 
+# write.csv(edge_list, file = "Correlation_GSE72540_edge_list.csv",row.names = F)
+```
+
+```{r fig.height=7, fig.width=9}
+# Create a correlation plot
+# corrplot(cor_matrix, method = "circle", type = "full", tl.col = "black")
+
+corrplot::corrplot(
+  cor_matrix,
+  method = "circle",
+  type = "upper",
+  tl.col = "black",
+  addCoef.col = "black",
+  number.cex = 0.8,
+  col = colorRampPalette(c("blue", "white", "red"))(100)  # Set the color palette
+)
+```
+
+
+### Correlation : scatterplot {.tabset}
+```{r}
+# Fonction pour créer un scatter plot avec ou sans outliers
+create_scatter_plot<- function(data, x, y, colors) {
+  quantiles <- quantile(data[[y]], probs = c(0.25, 0.75), na.rm = TRUE)
+  iqr <- IQR(data[[y]], na.rm = TRUE)
+  lower_bound <- quantiles[1] - 1.5 * iqr
+  upper_bound <- quantiles[2] + 1.5 * iqr
+  
+  outliers <- data[[y]] < lower_bound | data[[y]] > upper_bound
+  
+  sp <- ggscatter(data, x = x, y = y, color = "SamplePathology", 
+                  add = "reg.line", conf.int = TRUE, size = 3, alpha = 0.6,
+                  ggtheme = theme_bw()) + stat_cor(aes(color =
+                                                         SamplePathology),
+                                                   label.x = 
+                                                     min(csu_corr_table[[x]], na.rm = TRUE) - 0.1) +
+    scale_color_manual(values = colors) + scale_fill_manual(values = colors)
+  
+  if (any(outliers, na.rm = TRUE)) {
+    sp <- sp + 
+          geom_point(data = data[outliers, ], aes_string(x = x, y = y, fill = "SamplePathology"), shape = 21, color = "red", size = 3) +
+          geom_text_repel(data = data[outliers, ], aes_string(x = x, y = y, label = 'SampleID'), vjust = -1, color = "red", point.padding = 0.5)
+    sp_no_outliers <- ggscatter(data[!outliers, ], x = x, y = y,
+                                color = "SamplePathology", add = "reg.line", conf.int = TRUE,
+                                size = 3, alpha = 0.6, ggtheme = theme_bw()) + stat_cor(aes(color = SamplePathology), label.x = min(csu_corr_table[[x]], na.rm = TRUE) - 0.1) +
+    scale_color_manual(values = colors) + scale_fill_manual(values = colors)
+  }else{
+    sp_no_outliers <- NULL
+  }
+  return(list(with_outliers = sp, without_outliers = sp_no_outliers))
+}
+
+create_boxplot <- function(data, x, y, colors) {
+  if(y == "ASST"||y=="AntiH1_x4.R"||y=="CsA.R"){
+    bp <- ggboxplot(data, x = y, y = x,
+                    color = "SamplePathology", fill = "SamplePathology", alpha = 0.5, ggtheme = theme_bw()) +
+      scale_fill_manual(values = colors) + scale_color_manual(values = colors) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    return(bp)
+  }else{
+  bp <- ggboxplot(data, x = "SamplePathology", y = y,
+                  color = "SamplePathology", fill = "SamplePathology", alpha = 0.5, ggtheme = theme_bw()) +
+    scale_fill_manual(values = colors) + scale_color_manual(values = colors) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  return(bp)
+  }
+}
+```
+
+```{r fig.height=5, fig.width=9, warning=FALSE,include=F}
+selected_vars_x <- genes_of_interest
+selected_vars_y <- c("CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7")
+
+colors <- c("normal" = "#4DBBD4B2", "urticaria" = "#E64B35B2", "non-lesional" = "#7E6148B2", "lesional" = "#E64B35B2")
+
+scatter_plot_list <- list()
+scatter_plot_list_no_outliers <- list()
+
+for (x in selected_vars_x) {
+  if (x == "CD40"|| x=="TNFRSF4") {
+    special_ys <- c("S100A9", "S100A8", "S100A12")
+    for(y in special_ys){
+      plot_data <- create_scatter_plot(csu_corr_table, x, y, colors)
+      sp <- plot_data$with_outliers 
+      xplot <- create_boxplot(csu_corr_table, x, x, colors)
+      yplot <- create_boxplot(csu_corr_table, x, y, colors)
+      combined_plot <- plot_grid(xplot, NULL, sp, yplot, ncol = 2, align = "hv", 
+                                 rel_widths = c(2, 1), rel_heights = c(1, 2))
+      scatter_plot_list[[paste(x, y, sep = "_")]] <- combined_plot
+      scatter_plot_list_no_outliers[[paste(x, y, sep = "_")]] <- plot_data$without_outliers
+    }
+    for(y in selected_vars_y){
+      if (y == "ASST"||y=="AntiH1_x4.R"||y=="CsA.R") {
+        sp <- create_boxplot(csu_corr_table, x, y, colors)
+      } else {
+        plot_data <- create_scatter_plot(csu_corr_table, x, y, colors)
+        sp <- plot_data$with_outliers 
+        scatter_plot_list_no_outliers[[paste(x, y, sep = "_")]] <- plot_data$without_outliers
+      }
+      xplot <- create_boxplot(csu_corr_table, x, x, colors)
+      yplot <- create_boxplot(csu_corr_table, x, y, colors)
+      combined_plot <- plot_grid(xplot, NULL, sp, yplot, ncol = 2, align = "hv", 
+                                 rel_widths = c(2, 1), rel_heights = c(1, 2))
+      scatter_plot_list[[paste(x, y, sep = "_")]] <- combined_plot
+    }
+  }else{
+    for(y in selected_vars_y){
+      if (y == "ASST"||y=="AntiH1_x4.R"||y=="CsA.R") {
+        sp <- create_boxplot(csu_corr_table, x, y, colors)
+      } else {
+        plot_data <- create_scatter_plot(csu_corr_table, x, y, colors)
+        sp <- plot_data$with_outliers 
+        scatter_plot_list_no_outliers[[paste(x, y, sep = "_")]] <- plot_data$without_outliers
+      }
+      xplot <- create_boxplot(csu_corr_table, x, x, colors)
+      yplot <- create_boxplot(csu_corr_table, x, y, colors)
+      combined_plot <- plot_grid(xplot, NULL, sp, yplot, ncol = 2, align = "hv", 
+                                 rel_widths = c(2, 1), rel_heights = c(1, 2))
+      scatter_plot_list[[paste(x, y, sep = "_")]] <- combined_plot
+    }
+  }
+} 
+
+```
+
+```{r,include=F}
+# Créer les onglets de niveau supérieur pour chaque gène
+for(gene in selected_vars_x) {
+  cat(paste("####", gene, "{.tabset}\n\n"))
+  if(gene=="CD40"||gene=="TNFRSF4"){
+    for(clinical in selected_vars_y) {
+    tab_title <- paste(gene, "vs", clinical)
+    cat(paste("#####", tab_title, "\n"))
+
+    plot_name <- paste(gene, clinical, sep="_")
+    cat(paste("```{r,", "fig.width=16, fig.height=10","}\n"))
+    cat(paste("scatter_plot_list$", plot_name, "\n", sep=""))
+    cat("```\n\n")
+    }
+    special_ys <- c("S100A9", "S100A8", "S100A12")
+    for( clinical in special_ys){
+       tab_title <- paste(gene, "vs", clinical)
+    cat(paste("#####", tab_title, "\n"))
+
+    plot_name <- paste(gene, clinical, sep="_")
+    cat(paste("```{r,", "fig.width=16, fig.height=10","}\n"))
+    cat(paste("scatter_plot_list$", plot_name, "\n", sep=""))
+    cat("```\n\n")
+  }
+}else{
+  for(clinical in selected_vars_y) {
+    tab_title <- paste(gene, "vs", clinical)
+    cat(paste("#####", tab_title, "\n"))
+
+    plot_name <- paste(gene, clinical, sep="_")
+    cat(paste("```{r,", "fig.width=16, fig.height=10","}\n"))
+    cat(paste("scatter_plot_list$", plot_name, "\n", sep=""))
+    cat("```\n\n")
+  }
+}
+}
+
+```
+#### TNFRSF4 {.tabset}
+
+##### TNFRSF4 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_CsA.R
+```
+
+##### TNFRSF4 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_AntiH1_x4.R
+```
+
+##### TNFRSF4 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_ASST
+```
+
+##### TNFRSF4 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_Age
+```
+
+##### TNFRSF4 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_Duration_.months.
+```
+
+##### TNFRSF4 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_IgE
+```
+
+##### TNFRSF4 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_DD
+```
+
+##### TNFRSF4 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_UAS7
+```
+
+##### TNFRSF4 vs S100A9 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_S100A9
+```
+
+##### TNFRSF4 vs S100A8 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_S100A8
+```
+
+##### TNFRSF4 vs S100A12 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$TNFRSF4_S100A12
+```
+
+#### PMM2 {.tabset}
+
+##### PMM2 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_CsA.R
+```
+
+##### PMM2 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_AntiH1_x4.R
+```
+
+##### PMM2 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_ASST
+```
+
+##### PMM2 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_Age
+```
+
+##### PMM2 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_Duration_.months.
+```
+
+##### PMM2 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_IgE
+```
+
+##### PMM2 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_DD
+```
+
+##### PMM2 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$PMM2_UAS7
+```
+
+#### CD40 {.tabset}
+
+##### CD40 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_CsA.R
+```
+
+##### CD40 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_AntiH1_x4.R
+```
+
+##### CD40 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_ASST
+```
+
+##### CD40 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_Age
+```
+
+##### CD40 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_Duration_.months.
+```
+
+##### CD40 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_IgE
+```
+
+##### CD40 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_DD
+```
+
+##### CD40 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_UAS7
+```
+
+##### CD40 vs S100A9 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_S100A9
+```
+
+##### CD40 vs S100A8 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_S100A8
+```
+
+##### CD40 vs S100A12 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$CD40_S100A12
+```
+
+#### JUNB {.tabset}
+
+##### JUNB vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_CsA.R
+```
+
+##### JUNB vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_AntiH1_x4.R
+```
+
+##### JUNB vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_ASST
+```
+
+##### JUNB vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_Age
+```
+
+##### JUNB vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_Duration_.months.
+```
+
+##### JUNB vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_IgE
+```
+
+##### JUNB vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_DD
+```
+
+##### JUNB vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$JUNB_UAS7
+```
+
+#### SOCS3 {.tabset}
+
+##### SOCS3 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_CsA.R
+```
+
+##### SOCS3 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_AntiH1_x4.R
+```
+
+##### SOCS3 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_ASST
+```
+
+##### SOCS3 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_Age
+```
+
+##### SOCS3 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_Duration_.months.
+```
+
+##### SOCS3 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_IgE
+```
+
+##### SOCS3 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_DD
+```
+
+##### SOCS3 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$SOCS3_UAS7
+```
+
+#### S100A9 {.tabset}
+
+##### S100A9 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_CsA.R
+```
+
+##### S100A9 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_AntiH1_x4.R
+```
+
+##### S100A9 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_ASST
+```
+
+##### S100A9 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_Age
+```
+
+##### S100A9 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_Duration_.months.
+```
+
+##### S100A9 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_IgE
+```
+
+##### S100A9 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_DD
+```
+
+##### S100A9 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A9_UAS7
+```
+
+#### S100A12 {.tabset}
+
+##### S100A12 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_CsA.R
+```
+
+##### S100A12 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_AntiH1_x4.R
+```
+
+##### S100A12 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_ASST
+```
+
+##### S100A12 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_Age
+```
+
+##### S100A12 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_Duration_.months.
+```
+
+##### S100A12 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_IgE
+```
+
+##### S100A12 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_DD
+```
+
+##### S100A12 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A12_UAS7
+```
+
+#### S100A8 {.tabset}
+
+##### S100A8 vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_CsA.R
+```
+
+##### S100A8 vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_AntiH1_x4.R
+```
+
+##### S100A8 vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_ASST
+```
+
+##### S100A8 vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_Age
+```
+
+##### S100A8 vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_Duration_.months.
+```
+
+##### S100A8 vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_IgE
+```
+
+##### S100A8 vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_DD
+```
+
+##### S100A8 vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$S100A8_UAS7
+```
