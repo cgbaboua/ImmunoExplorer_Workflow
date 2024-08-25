@@ -1,0 +1,171 @@
+## **Hub Genes (Lasso)**
+
+```{r}
+library(caret)
+library(glmnet)
+library(ROSE)
+```
+
+```{r}
+# Charger les modules
+load(file="~/Internship_data/CSU/WGCNA/forLasso/modules_list_GSE72540_2.RData")
+```
+
+```{r}
+# Charger les données d'expression pour l'entraînement
+eset_file_train <- "GSE72540_eset.rds"
+data_train <- readRDS(sprintf("/home/DA82_SUR/Internship_data/CSU/eSet/%s", eset_file_train))
+DEG_exprs_train <- "DEG_expression_GSE72540_2.csv"
+exprs_data_train <- read.csv(sprintf("/home/DA82_SUR/Internship_data/CSU/WGCNA/forWGCNA/%s", DEG_exprs_train))
+rownames(exprs_data_train) <- exprs_data_train$X
+exprs_data_train$X <- NULL
+
+# Convertir la matrice d'expression en data.frame
+exprs_data_train <- as.data.frame(exprs_data_train)
+# Transposer pour avoir les échantillons en lignes et les gènes en colonnes
+exprs_data_train <- as.data.frame(t(exprs_data_train))
+
+# Récupération des données de maladies des patients pour l'entraînement
+sample_status_train <- pData(data_train)[c("SamplePathology","DiseaseState", "SampleID")]
+# Remplacer les valeurs de DiseaseState selon SamplePathology
+sample_status_train$DiseaseState <- ifelse(sample_status_train$SamplePathology == "non-lesional" | sample_status_train$SamplePathology == "normal", "HC", sample_status_train$DiseaseState)
+
+# Ensuite, appliquer votre transformation pour tout ce qui n'est pas "normal control" (qui a déjà été modifié)
+sample_status_train$DiseaseState <- ifelse(sample_status_train$DiseaseState != "HC", "CSU", sample_status_train$DiseaseState)
+
+
+
+# Créer une dataframe combinant les données d'expression et la variable cible
+data_combined <- exprs_data_train
+data_combined$SampleID <- rownames(data_combined)
+data_combined <- cbind(data_combined,sample_status_train)
+data_combined$SampleID <- NULL
+data_combined$SampleID <- NULL
+colnames(data_combined)[ncol(data_combined)] <- "y"
+data_combined$y <- as.factor(data_combined[,ncol(data_combined)])
+
+y <- data_combined$y
+
+```
+
+### Hub genes detection for blue module
+```{r}
+set.seed(444)
+# Extraire les gènes du module bleu et vérifier qu'ils existent dans data_train
+blue_genes <- blue_module_GSE72540
+blue_genes <- blue_genes[blue_genes %in% colnames(data_combined)]
+
+# Sélectionner les colonnes correspondantes aux gènes du module bleu
+data_blue <- data_combined[, c(blue_genes, "y")]
+
+
+# Définir la méthode de contrôle pour l'entraînement avec validation croisée
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "final")
+
+# Appliquer la régression Lasso avec validation croisée pour le module bleu
+
+lasso_model_blue <- train(y ~ ., data = data_blue, method = "glmnet", 
+                          trControl = train_control, 
+                          tuneGrid = expand.grid(alpha = 1, lambda = seq(0.001, 0.1, by = 0.001)),maxit=10000)
+
+# Afficher les meilleurs paramètres
+#print(lasso_model_blue$bestTune)
+
+
+# Extraire les coefficients non-nuls
+lasso_coef_blue <- coef(lasso_model_blue$finalModel, s = lasso_model_blue$bestTune$lambda)
+lasso_coef_blue <- as.matrix(lasso_coef_blue)
+
+# Trouver les gènes hub (coefficients non-nuls)
+non_zero_indices_blue <- which(lasso_coef_blue != 0)
+hub_genes_blue <- rownames(lasso_coef_blue)[non_zero_indices_blue]
+hub_genes_blue <- hub_genes_blue[hub_genes_blue != "(Intercept)"]
+
+# Afficher les gènes hub
+#print("Gènes hub identifiés dans le module bleu :")
+#print(hub_genes_blue)
+
+
+# Créer une heatmap pour les hub genes
+hub_gene_exprs_blue <- exprs_data_train[, hub_genes_blue, drop = FALSE]
+hub_gene_exprs_blue <- as.data.frame(scale(hub_gene_exprs_blue))
+hub_gene_exprs_blue$Sample <- rownames(hub_gene_exprs_blue)
+
+# Convertir en format long pour ggplot2
+hub_gene_exprs_blue_long <- melt(hub_gene_exprs_blue, id.vars = "Sample")
+colnames(hub_gene_exprs_blue_long) <- c("Sample", "Gene", "Expression")
+
+# Ajouter les informations de DiseaseStage
+hub_gene_exprs_blue_long <- hub_gene_exprs_blue_long %>%
+  left_join(sample_status_train, by = c("Sample" = "SampleID"))
+
+# Afficher la heatmap
+ggplot(hub_gene_exprs_blue_long, aes(x = Sample, y = Gene, fill = Expression)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = median(hub_gene_exprs_blue_long$Expression)) +
+  theme_bw() +
+  labs(title = "Heatmap of Hub Genes Expression - Blue Module", x = "Samples", y = "Hub Genes") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_grid(~DiseaseState, scales = "free_x", space = "free")
+```
+
+### Hub genes detection for turquoise module turquoise
+```{r}
+set.seed(444)
+# Extraire les gènes du module turquoise et vérifier qu'ils existent dans data_train
+turquoise_genes <- turquoise_module_GSE72540
+turquoise_genes <- turquoise_genes[turquoise_genes %in% colnames(data_combined)]
+
+# Sélectionner les colonnes correspondantes aux gènes du module turquoise
+data_turquoise <- data_combined[, c(turquoise_genes, "y")]
+
+
+# Définir la méthode de contrôle pour l'entraînement avec validation croisée
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "final")
+
+# Appliquer la régression Lasso avec validation croisée pour le module turquoise
+
+lasso_model_turquoise <- train(y ~ ., data = data_turquoise, method = "glmnet", 
+                          trControl = train_control, 
+                          tuneGrid = expand.grid(alpha = 1, lambda = seq(0.001, 0.1, by = 0.001)),maxit=10000)
+
+# Afficher les meilleurs paramètres
+#print(lasso_model_turquoise$bestTune)
+
+
+# Extraire les coefficients non-nuls
+lasso_coef_turquoise <- coef(lasso_model_turquoise$finalModel, s = lasso_model_turquoise$bestTune$lambda)
+lasso_coef_turquoise <- as.matrix(lasso_coef_turquoise)
+
+# Trouver les gènes hub (coefficients non-nuls)
+non_zero_indices_turquoise <- which(lasso_coef_turquoise != 0)
+hub_genes_turquoise <- rownames(lasso_coef_turquoise)[non_zero_indices_turquoise]
+hub_genes_turquoise <- hub_genes_turquoise[hub_genes_turquoise != "(Intercept)"]
+
+# Afficher les gènes hub
+#print("Gènes hub identifiés dans le module turquoise :")
+#print(hub_genes_turquoise)
+
+
+# Créer une heatmap pour les hub genes
+hub_gene_exprs_turquoise <- exprs_data_train[, hub_genes_turquoise, drop = FALSE]
+hub_gene_exprs_turquoise <- as.data.frame(scale(hub_gene_exprs_turquoise))
+hub_gene_exprs_turquoise$Sample <- rownames(hub_gene_exprs_turquoise)
+
+# Convertir en format long pour ggplot2
+hub_gene_exprs_turquoise_long <- melt(hub_gene_exprs_turquoise, id.vars = "Sample")
+colnames(hub_gene_exprs_turquoise_long) <- c("Sample", "Gene", "Expression")
+
+# Ajouter les informations de DiseaseStage
+hub_gene_exprs_turquoise_long <- hub_gene_exprs_turquoise_long %>%
+  left_join(sample_status_train, by = c("Sample" = "SampleID"))
+
+# Afficher la heatmap
+ggplot(hub_gene_exprs_turquoise_long, aes(x = Sample, y = Gene, fill = Expression)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = median(hub_gene_exprs_turquoise_long$Expression)) +
+  theme_bw() +
+  labs(title = "Heatmap of Hub Genes Expression - turquoise Module", x = "Samples", y = "Hub Genes") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_grid(~DiseaseState, scales = "free_x", space = "free")
+```
