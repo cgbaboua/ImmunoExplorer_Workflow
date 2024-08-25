@@ -1,0 +1,248 @@
+
+## **Pathways and enrichment analysis** {.tabset}
+
+
+```{r,include=F}
+# Charger les packages nécessaires
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(DOSE)
+library(bbcViz)
+library(enrichplot)
+library(tidyr)
+library(dplyr)
+```
+
+```{r,include=F}
+# Charger les données d'expression pour GSE72540
+eset_file <- "GSE72540_eset.rds"
+data <- readRDS(sprintf("/home/DA82_SUR/Internship_data/CSU/eSet/%s",eset_file))
+DEG_exprs <- "DEG_expression_GSE72540.csv"
+exprs_data <- read.csv(sprintf("/home/DA82_SUR/Internship_data/CSU/WGCNA/forWGCNA/%s",DEG_exprs))
+rownames(exprs_data) <- exprs_data$X
+exprs_data$X <- NULL
+DEA <- read.csv("~/Internship_data/CSU/Pathways/ALL_DEA_GSE72540.csv")
+
+#Liste de gènes différentiellement exprimés (DEGs)
+deg_genes <- rownames(exprs_data)
+
+#Liste de tous les gènes classés par log2FC 
+geneList <- DEA$log2FC
+names(geneList) <- DEA$Genes
+geneList <- sort(geneList,decreasing=T)
+
+# Liste des gènes d'intêrets
+genes_of_interest <- c("TNFRSF4","CD40","CXCR3","CXCR4","BCL2A1","IL21R","TIGIT","S100A9","S100A12","S100A8" )
+
+```
+
+### **EnrichGO** {.tabset}
+
+```{r,include=F}
+# Over Representation Analysis avec enrichGO
+edo <- enrichGO(gene         = deg_genes,
+                OrgDb        = org.Hs.eg.db,
+                keyType      = "SYMBOL",
+                ont          = "ALL",
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.01)
+
+# Extraction des résultats significatifs
+go_results <- as.data.frame(edo)
+```
+
+#### **Table of enrichment results**
+
+```{r,echo=F}
+bbcViz::display_table(head(go_results))
+```
+
+#### **Barplot**
+
+```{r,echo=F,fig.height=16,fig.width=16}
+barplot(edo,showCategory = 30,font.size=16)
+```
+
+#### **Dotplot**
+
+```{r,echo=F,fig.height=15,fig.width=11}
+enrichplot::dotplot(edo,showCategory=30,font.size=10) + facet_grid(ONTOLOGY~., scale="free")
+```
+
+#### **Emaplot**
+
+```{r,echo=F,fig.width=14,fig.height=12}
+emapplot(pairwise_termsim(edo), showCategory = 30)
+```
+
+#### **Cnetplot** {.tabset}
+
+##### Non circular
+
+```{r,echo=F,fig.width=12,fig.height=14}
+# Gene-Concept Network
+cnetplot(edo, color.params=list(foldChange = geneList))
+```
+
+##### Circular
+
+```{r,echo=F,fig.width=12,fig.height=14,warning=F}
+# Gene-Concept Network
+cnetplot(edo, color.params=list(foldChange = geneList),showCategory=10,circular=T,colorEdge=T)
+```
+
+#### **Upsetplot**
+
+```{r,echo=F}
+# UpSet Plot
+upsetplot(edo)
+```
+
+#### **Heatmap**
+
+```{r,echo=F,fig.height=16,fig.width=8}
+# Filtrer les résultats pour ne conserver que les termes contenant les gènes d'intérêt
+filtered_terms <- edo@result[sapply(strsplit(edo@result$geneID, "/"), function(genes) any(genes %in% genes_of_interest)), ]
+
+# Filtrer les gènes dans les résultats d'enrichissement pour ne conserver que les gènes d'intérêt
+filtered_terms$geneID <- sapply(strsplit(filtered_terms$geneID, "/"), function(genes) paste(genes[genes %in% genes_of_interest], collapse = "/"))
+
+# Mettre à jour l'objet enrichGO avec les termes filtrés
+edo_filtered <- edo
+edo_filtered@result <- filtered_terms
+
+heatplot(edo_filtered)
+```
+
+#### **Genes/Pathways association**
+
+```{r,echo=F}
+gene_pathway_assoc <- edo
+
+# Convertir en data.frame
+gene_pathway_df <- as.data.frame(gene_pathway_assoc)
+
+# Sélectionner les colonnes d'intérêt
+gene_pathway_df <- gene_pathway_df[, c("geneID", "Description","p.adjust")]
+
+# Séparer les gènes dans des lignes différentes
+gene_pathway_df <- gene_pathway_df %>% 
+  separate_rows(geneID, sep = "/")
+
+edge_list <- gene_pathway_df %>%
+  dplyr::rename(from = geneID, 
+                to = Description, 
+                weight = p.adjust) 
+# Affichage du tableau interactif
+bbcViz::display_table(edge_list[1:2],
+          caption = 'Table of Genes and their Associated Pathways')
+
+
+# Save the edge list
+write.csv(edge_list, "Pathway_GSE72540_edge_list_2.csv",row.names = F)
+```
+
+### **GseGO** {.tabset}
+
+```{r,include=F}
+gse <- gseGO(geneList= geneList, 
+             ont ="ALL", 
+             keyType = "SYMBOL",
+             pvalueCutoff = 0.01, 
+             OrgDb = org.Hs.eg.db, 
+             pAdjustMethod = "BH",
+             eps = 0)
+
+# Extraction des résultats significatifs
+gse_results <- as.data.frame(gse)
+gse_results$Count <- sapply(gse_results$core_enrichment, function(x) length(strsplit(x, "/")[[1]]))
+```
+
+#### **Table of enrichment results**
+
+```{r,echo=F}
+bbcViz::display_table(head(gse_results))
+```
+
+#### **Dotplot** {.tabset}
+
+##### By Ontology
+
+```{r,fig.width=11,fig.height=15,echo=F}
+# Dotplot des termes enrichis
+enrichplot::dotplot(gse,showCategory=30,font.size=11) + facet_grid(ONTOLOGY~., scale="free")
+```
+
+##### By Sign
+
+```{r,fig.width=11,fig.height=20,echo=F}
+enrichplot::dotplot(gse, showCategory=30, split=".sign",font.size=10) + facet_grid(.~.sign)
+```
+
+#### **Emaplot**
+
+```{r,echo=F,fig.height=12,fig.width=14}
+emapplot(pairwise_termsim(gse), showCategory = 30)
+```
+
+#### **Cnetplot**
+
+```{r,fig.width=16,fig.height=15,echo=F,warning=F}
+# Gene-Concept Network
+cnetplot(gse, color.params=list(foldChange = geneList),showCategory=5,vertex.label.font=6)
+```
+
+#### **Upsetplot**
+
+```{r,echo=F,fig.height=6,fig.width=14}
+# UpSet Plot
+upsetplot(gse)
+```
+
+#### **Heatmap**
+
+```{r,echo=F,fig.height=16,fig.width=8}
+# Filtrer les résultats pour ne conserver que les termes contenant les gènes d'intérêt
+filtered_terms <- gse@result[sapply(strsplit(gse@result$core_enrichment, "/"), function(genes) any(genes %in% genes_of_interest)), ]
+
+# Filtrer les gènes dans les résultats d'enrichissement pour ne conserver que les gènes d'intérêt
+filtered_terms$core_enrichment <- sapply(strsplit(filtered_terms$core_enrichment, "/"), function(genes) paste(genes[genes %in% genes_of_interest], collapse = "/"))
+
+# Mettre à jour l'objet enrichGO avec les termes filtrés
+gse_filtered <- gse
+gse_filtered@result <- filtered_terms
+
+heatplot(gse_filtered)
+```
+
+#### **Genes/Pathways association**
+
+```{r,echo=F,warning=F}
+# Convertir en data.frame
+gene_pathway_df <- gse_results
+names(gene_pathway_df)[which(names(gene_pathway_df)=="core_enrichment")] <- "geneID"
+
+# Sélectionner les colonnes d'intérêt
+gene_pathway_df <- gene_pathway_df[, c("geneID", "Description")]
+
+# Séparer les gènes dans des lignes différentes
+gene_pathway_df <- gene_pathway_df %>% 
+  separate_rows(geneID, sep = "/")
+
+# Create edge_list for RWR
+edge_list <- gse_results %>%
+  tidyr::separate_rows(core_enrichment, sep = "/") %>%
+  dplyr::select(core_enrichment, Description, enrichmentScore) %>%
+  dplyr::rename(geneID = core_enrichment, 
+                pathway = Description, 
+                weight = enrichmentScore)
+
+# Save the edge list
+write.csv(edge_list, "Pathway_GSE72540_edge_list.csv",row.names = F)
+
+
+# Affichage du tableau interactif
+bbcViz::display_table(gene_pathway_df,
+          caption = 'Table of Genes and their Associated Pathways',nmax_display = 10)
+
+```
