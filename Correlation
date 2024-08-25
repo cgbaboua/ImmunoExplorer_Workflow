@@ -1,0 +1,273 @@
+## **Correlation with WGCNA**{.tabset}
+
+:::info
+Unlike the WGCNA analysis and the rest, for the correlations we have decided not to filter the samples to avoid having too little information.
+:::
+
+```{r,include=F}
+library(ggrepel)
+eset_file <- "GSE72540_eset.rds"
+data <- read_rds(sprintf("/home/DA82_SUR/Internship_data/CSU/eSet/%s",eset_file))
+wgcna_data <- readRDS("~/Internship_data/CSU/Correlation/WGCNA_GSE72540_2_data_corr.rds")
+wgcna_data <- wgcna_data %>% dplyr::rename(SampleID=treatment) 
+wgcna_data <- wgcna_data[1:3]
+```
+
+```{r}
+#Liste des modules d'intérêts
+modules_of_interest <- colnames(wgcna_data[2:3])
+```
+
+```{r,include=F}
+info_of_interest <- c("SampleID","SamplePathology","Treatment","Gender","Urticaria_severity","AntiH1_x1.R","CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7")
+clinical_info <- pData(data)
+
+# Garder seulement les infos qui nous intéressent
+clinical_info <- clinical_info[,info_of_interest]
+```
+
+```{r,include=FALSE}
+csu_corr_table =dplyr::left_join(
+  clinical_info,
+  wgcna_data,
+  by = "SampleID"
+)
+
+# Direct transformation of 'Yes' in 1 and 'No' in 0
+csu_corr_table$ASST <- ifelse(csu_corr_table$ASST == "Yes", 1, 0)
+
+# Direct transformation of 'Yes' in 1 and 'No' in 0
+csu_corr_table$AntiH1_x4.R <- ifelse(csu_corr_table$AntiH1_x4.R == "Yes", 1,
+                                     ifelse(csu_corr_table$AntiH1_x4.R == "No", 0, 
+                                            csu_corr_table$AntiH1_x4.R))
+# Direct transformation of 'Yes' in 1 and 'No' in 0
+csu_corr_table$CsA.R <- ifelse(csu_corr_table$CsA.R == "Yes", 1,
+                                     ifelse(csu_corr_table$CsA.R == "No", 0, 
+                                            csu_corr_table$CsA.R))
+  
+csu_corr_table[, 6:ncol(csu_corr_table)] <- apply(csu_corr_table[, 6:ncol(csu_corr_table)], 2, as.numeric)
+```
+
+### **Correlation: corrplot**
+
+```{r,include=FALSE}
+csu_corr_table_corplot <- csu_corr_table %>% dplyr::select(c("CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7", all_of(modules_of_interest)))
+
+# Compute the correlation matrix
+cor_matrix <- cor(csu_corr_table_corplot, use = "pairwise.complete.obs")
+```
+
+```{r fig.height=7, fig.width=9}
+# Create a correlation plot
+# corrplot(cor_matrix, method = "circle", type = "full", tl.col = "black")
+
+corrplot::corrplot(
+  cor_matrix,
+  method = "circle",
+  type = "upper",
+  tl.col = "black",
+  addCoef.col = "black",
+  number.cex = 0.8,
+  col = colorRampPalette(c("blue", "white", "red"))(100)  # Set the color palette
+)
+```
+
+
+### **Correlation : scatterplot** {.tabset}
+```{r}
+# Fonction pour créer un scatter plot avec ou sans outliers
+create_scatter_plot<- function(data, x, y, colors) {
+  quantiles <- quantile(data[[y]], probs = c(0.25, 0.75), na.rm = TRUE)
+  iqr <- IQR(data[[y]], na.rm = TRUE)
+  lower_bound <- quantiles[1] - 1.5 * iqr
+  upper_bound <- quantiles[2] + 1.5 * iqr
+  
+  outliers <- data[[y]] < lower_bound | data[[y]] > upper_bound
+  
+  sp <- ggscatter(data, x = x, y = y, color = "SamplePathology", 
+                  add = "reg.line", conf.int = TRUE, size = 3, alpha = 0.6,
+                  ggtheme = theme_bw()) + stat_cor(aes(color =
+                                                         SamplePathology),
+                                                   label.x = 
+                                                     min(csu_corr_table[[x]], na.rm = TRUE) - 0.1) +
+    scale_color_manual(values = colors) + scale_fill_manual(values = colors)
+  
+  if (any(outliers, na.rm = TRUE)) {
+    sp <- sp + 
+          geom_point(data = data[outliers, ], aes_string(x = x, y = y, fill = "SamplePathology"), shape = 21, color = "red", size = 3) +
+          geom_text_repel(data = data[outliers, ], aes_string(x = x, y = y, label = 'SampleID'), vjust = -1, color = "red", point.padding = 0.5)
+    sp_no_outliers <- ggscatter(data[!outliers, ], x = x, y = y,
+                                color = "SamplePathology", add = "reg.line", conf.int = TRUE,
+                                size = 3, alpha = 0.6, ggtheme = theme_bw()) + stat_cor(aes(color = SamplePathology), label.x = min(csu_corr_table[[x]], na.rm = TRUE) - 0.1) +
+    scale_color_manual(values = colors) + scale_fill_manual(values = colors)
+  }else{
+    sp_no_outliers <- NULL
+  }
+  return(list(with_outliers = sp, without_outliers = sp_no_outliers))
+}
+
+create_boxplot <- function(data, x, y, colors) {
+  if(y == "ASST"||y=="AntiH1_x4.R"||y=="CsA.R"){
+    bp <- ggboxplot(data, x = y, y = x,
+                    color = "SamplePathology", fill = "SamplePathology", alpha = 0.5, ggtheme = theme_bw()) +
+      scale_fill_manual(values = colors) + scale_color_manual(values = colors) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    return(bp)
+  }else{
+  bp <- ggboxplot(data, x = "SamplePathology", y = y,
+                  color = "SamplePathology", fill = "SamplePathology", alpha = 0.5, ggtheme = theme_bw()) +
+    scale_fill_manual(values = colors) + scale_color_manual(values = colors) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  return(bp)
+  }
+}
+```
+
+```{r fig.height=5, fig.width=9, warning=FALSE,include=F}
+selected_vars_x <- modules_of_interest
+selected_vars_y <- c("CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7")
+
+colors <- c("normal" = "#4DBBD4B2", "urticaria" = "#E64B35B2", "non-lesional" = "#7E6148B2", "lesional" = "#E64B35B2")
+
+scatter_plot_list <- list()
+scatter_plot_list_no_outliers <- list()
+
+for (x in selected_vars_x) {
+    for(y in selected_vars_y){
+      if (y == "ASST"||y=="AntiH1_x4.R"||y=="CsA.R") {
+        sp <- create_boxplot(csu_corr_table, x, y, colors)
+      } else {
+        plot_data <- create_scatter_plot(csu_corr_table, x, y, colors)
+        sp <- plot_data$with_outliers 
+        scatter_plot_list_no_outliers[[paste(x, y, sep = "_")]] <- plot_data$without_outliers
+      }
+      xplot <- create_boxplot(csu_corr_table, x, x, colors)
+      yplot <- create_boxplot(csu_corr_table, x, y, colors)
+      combined_plot <- plot_grid(xplot, NULL, sp, yplot, ncol = 2, align = "hv", 
+                                 rel_widths = c(2, 1), rel_heights = c(1, 2))
+      scatter_plot_list[[paste(x, y, sep = "_")]] <- combined_plot
+    }
+  }
+```
+
+```{r,include=F}
+# Créer les onglets de niveau supérieur pour chaque gène
+for(gene in selected_vars_x) {
+  cat(paste("####", gene, "{.tabset}\n\n"))
+  if(gene=="CD40"||gene=="TNFRSF4"){
+    for(clinical in selected_vars_y) {
+    tab_title <- paste(gene, "vs", clinical)
+    cat(paste("#####", tab_title, "\n"))
+
+    plot_name <- paste(gene, clinical, sep="_")
+    cat(paste("```{r,", "fig.width=16, fig.height=10","}\n"))
+    cat(paste("scatter_plot_list$", plot_name, "\n", sep=""))
+    cat("```\n\n")
+    }
+    special_ys <- c("S100A9", "S100A8", "S100A12")
+    for( clinical in special_ys){
+       tab_title <- paste(gene, "vs", clinical)
+    cat(paste("#####", tab_title, "\n"))
+
+    plot_name <- paste(gene, clinical, sep="_")
+    cat(paste("```{r,", "fig.width=16, fig.height=10","}\n"))
+    cat(paste("scatter_plot_list$", plot_name, "\n", sep=""))
+    cat("```\n\n")
+  }
+}else{
+  for(clinical in selected_vars_y) {
+    tab_title <- paste(gene, "vs", clinical)
+    cat(paste("#####", tab_title, "\n"))
+
+    plot_name <- paste(gene, clinical, sep="_")
+    cat(paste("```{r,", "fig.width=16, fig.height=10","}\n"))
+    cat(paste("scatter_plot_list$", plot_name, "\n", sep=""))
+    cat("```\n\n")
+  }
+}
+}
+
+```
+
+#### MEblue {.tabset}
+
+##### MEblue vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_CsA.R
+```
+
+##### MEblue vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_AntiH1_x4.R
+```
+
+##### MEblue vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_ASST
+```
+
+##### MEblue vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_Age
+```
+
+##### MEblue vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_Duration_.months.
+```
+
+##### MEblue vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_IgE
+```
+
+##### MEblue vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_DD
+```
+
+##### MEblue vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEblue_UAS7
+```
+
+#### MEturquoise {.tabset}
+
+##### MEturquoise vs CsA.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_CsA.R
+```
+
+##### MEturquoise vs AntiH1_x4.R 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_AntiH1_x4.R
+```
+
+##### MEturquoise vs ASST 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_ASST
+```
+
+##### MEturquoise vs Age 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_Age
+```
+
+##### MEturquoise vs Duration_.months. 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_Duration_.months.
+```
+
+##### MEturquoise vs IgE 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_IgE
+```
+
+##### MEturquoise vs DD 
+```{r, fig.width=16, fig.height=10 }
+scatter_plot_list$MEturquoise_DD
+```
+
+##### MEturquoise vs UAS7 
+```{r, fig.width=16, fig.height=10 }
+scat
