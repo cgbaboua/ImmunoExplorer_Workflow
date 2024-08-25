@@ -1,0 +1,201 @@
+## **Random Walk With Restart**
+
+<!--Load libraries-->
+```{r}
+# Dnet package is required for RWRMH 
+# devtools::install_github("hfang-bristol/dnet")
+# devtools::install_github("alberto-valdeolivas/RandomWalkRestartMH")
+
+library(dnet)
+library(RandomWalkRestartMH)
+library(igraph)
+library(tidyr)
+```
+
+```{r}
+data_name <- "GSE72540"
+# PPI
+PPI <-  read.csv(sprintf("~/Internship_data/CSU/Interactions/PPI_interactions_%s.csv", data_name))
+# Pathways
+Pathways <- read.csv(sprintf("~/Internship_data/CSU/Pathways/Pathway_%s_edge_list_2.csv",data_name))
+# Correlation
+Corr <- read.csv(sprintf("~/Internship_data/CSU/Correlation/Correlation_%s_edge_list.csv",data_name))
+
+```
+
+```{r}
+# Définir la liste des noms des données cliniques
+clinical_data <- c("CsA.R","AntiH1_x4.R","ASST","Age","Duration_.months.","IgE","DD","UAS7")
+
+# Obtenir la liste de tous les gènes 
+Corr_filtered <- Corr[Corr$to %notin% clinical_data,]
+genes_in_corr <- unique(Corr_filtered$to)
+
+# Split Corr into two datasets:
+# 1. Corr_genes: contains only gene-gene correlations
+Corr_genes <- Corr[Corr$from %notin% clinical_data & Corr$to %notin% clinical_data,]
+# Ne garder que les fortes correlations (au dessus de 0.8)
+Corr_genes <- Corr_genes %>%
+  filter(abs(weight) > 0.6)
+# 2. Corr: contains only gene-clinical data correlations
+clinical_data <- "UAS7"
+Corr <- Corr[Corr$from %in% clinical_data | Corr$to %in% clinical_data,]
+```
+
+
+```{r}
+# All the dataset took the same format
+PPI <- PPI %>%
+    dplyr::rename(from = Gene_from, to = Gene_to, weight = combined_score)
+# Filter PPI to have only the 488 gene which are in Corr : 
+PPI <- PPI %>%
+  filter(from %in% genes_in_corr & to %in% genes_in_corr)
+# Filter PPI data for significance
+PPI <- PPI %>% filter (weight > 600)
+
+```
+
+```{r}
+# Créer les objets igraph pour chaque réseau
+PPI_Network <- graph_from_data_frame(d = PPI, directed = FALSE)
+Corr_genes_Network <- graph_from_data_frame(d=Corr_genes,directed = FALSE)
+Pathways_Network <- graph_from_data_frame(d = Pathways, directed = FALSE)
+Corr_Network <- graph_from_data_frame(d = Corr, directed = FALSE)
+```
+
+```{r}
+# Créer le multiplex PPI
+PPI_Multiplex <- create.multiplex(list(PPI=PPI_Network,Corr_genes = Corr_genes_Network))
+# Créer le multiplex Corr-Pathways
+Pathways_Corr_Multiplex <- create.multiplex(list(Pathways=Pathways_Network,Corr=Corr_Network))
+```
+
+### **Creation of multiplex**
+```{r}
+# Créer les relations inter-couches pour tous les gènes
+# Nodes_relations to include only genes from the PPI network (first layer) to ensure consistency across layers bc he has the fewer genes and he is sandalone multiplex
+
+Nodes_relations <- data.frame(
+  from = genes_in_corr,
+  to = genes_in_corr,
+  stringsAsFactors = FALSE
+)
+
+# Créer l'objet multiplex-hétérogène
+Multiplex_Het_Network <- create.multiplexHet(PPI_Multiplex, Pathways_Corr_Multiplex,Nodes_relations)
+
+print(Multiplex_Het_Network)
+```
+
+```{r,message=F}
+Multiplex_Het_Network_TranMatrix <- compute.transition.matrix(Multiplex_Het_Network)
+```
+
+### **RWR Results**{.tabset}
+#### **Top 10 nodes global**
+```{r}
+SeedGene <- c("JUNB","S100A8","S100A9")
+SeedPathways <- c("UAS7")
+## We launch the algorithm with the default parameters (See details on manual)
+RWRMH_Results <-
+    Random.Walk.Restart.MultiplexHet(Multiplex_Het_Network_TranMatrix,
+    Multiplex_Het_Network,SeedGene,SeedPathways)
+# We display the results 
+bbcViz::display_table(RWRMH_Results$RWRMH_GlobalResults)
+```
+
+#### **Top 10 nodes of 1st Multiplex**
+```{r}
+# We display the results 
+bbcViz::display_table(RWRMH_Results$RWRMH_Multiplex1)
+```
+
+#### **Top 10 nodes of 2nd Multiplex** 
+```{r}
+# We display the results 
+bbcViz::display_table(RWRMH_Results$RWRMH_Multiplex2)
+```
+
+```{r}
+## In this case we select to induce a network with the Top 10 genes.
+## and the Top 10 diseases.
+TopResults <-
+    create.multiplexHetNetwork.topResults(RWRMH_Results,
+    Multiplex_Het_Network, Nodes_relations, k=10)
+```
+
+```{r}
+# Fonction pour diviser les étiquettes longues en plusieurs lignes, en tenant compte des séparateurs comme "_" et "-"
+split_text_into_lines <- function(text, max_words_per_line = 1) {
+  # Remplacer les séparateurs "_" et "-" par des espaces pour diviser correctement
+  text <- gsub("[_-]", " ", text)
+  
+  # Diviser le texte en mots
+  words <- unlist(strsplit(text, " "))
+  
+  # Calculer le nombre de lignes nécessaires
+  lines <- ceiling(length(words) / max_words_per_line)
+  
+  # Diviser les mots en groupes de max_words_per_line mots
+  split_words <- split(words, ceiling(seq_along(words) / max_words_per_line))
+  
+  # Combiner les mots dans les lignes et les lignes ensemble avec des sauts de ligne
+  return(paste(sapply(split_words, paste, collapse = " "), collapse = "\n"))
+}
+
+# Appliquer cette fonction à vos étiquettes
+V(TopResults)$name <- sapply(V(TopResults)$name, function(x) split_text_into_lines(x, max_words_per_line = 2))
+
+```
+
+### **Network plot**
+```{r,fig.height=10,fig.width=12}
+## We print that cluster with its interactions.
+par(mar=c(0.1,0.1,0.1,8),xpd=TRUE)
+
+plot(TopResults, 
+      layout=layout_on_grid(TopResults),
+    vertex.label.color = "black",
+    vertex.frame.color = "#ffffff",
+    vertex.size = 35,
+    vertex.label.cex = 50/50,
+    edge.curved = ifelse(E(TopResults)$type == "Corr", 0, 0.4),
+    
+    vertex.color = ifelse(V(TopResults)$name %in% SeedGene | V(TopResults)$name %in% SeedPathways, "yellow",
+                          ifelse(V(TopResults)$name %in% Multiplex_Het_Network$Multiplex1$Nodes_relations,"deeppink","#00CCFF")),
+    
+    edge.color = ifelse(E(TopResults)$type == "PPI", "blue",   # Couleur pour PPI
+                        ifelse(E(TopResults)$type == "Pathways", "red",  # Couleur pour WGCNA
+                               ifelse(E(TopResults)$type=="Corr", "chartreuse4",  # Couleur pour Corr lié aux données cliniques
+                                      ifelse(E(TopResults)$type=="Corr_genes","deeppink",
+                                      "white")))),  # Couleur pour les autres (bipartite)
+    # Epaisseur
+    edge.width = ifelse(E(TopResults)$type == "PPI", 2,# Epaisseur pour PPI
+                        ifelse(E(TopResults)$type=="Pathways",1.75,
+                               ifelse(E(TopResults)$type=="Corr",
+                                      ifelse(abs(E(TopResults)$weight) > 0.8, 3,
+                                          ifelse(abs(E(TopResults)$weight) > 0.5 & abs(E(TopResults)$weight) <= 0.8, 2,  # Moyennement épais pour abs(weight) entre 0.5 et 0.8
+                                                 0)),  # Fin pour abs(weight) <= 0.5,
+                               ifelse(E(TopResults)$type == "Corr_genes", 1,  # Epaisseur pour Corr
+                                      1.25)))),  # Epaisseur par défaut
+    # Style des traits
+    edge.lty = ifelse(E(TopResults)$type == "PPI", 1,  # Style de ligne pour PPI (solide)
+                      ifelse(E(TopResults)$type=="Corr",1,
+                             ifelse(E(TopResults)$type == "Corr_genes",3,  # Style de ligne pour Corr (point-trait)
+                                    ifelse(E(TopResults)$type == "bipartiteRelations", 4,  # Style de ligne pour bipartiteRelations (trait-point)
+                                           1)))),  # Style de ligne par défaut (solide)
+    
+    vertex.shape = ifelse(V(TopResults)$name %in% Multiplex_Het_Network$Multiplex1$Nodes_relations, "circle", "rectangle")
+)
+
+legend("right", inset=c(-0.15, 0), legend=c("PPI", "Pathways", "Corr w/ clinical data (>0.5)","Corr w/ genes (>0.6)","Seed"),
+       col=c("blue", "red", "chartreuse4","deeppink", "yellow"), 
+       lty=c(1, 1, 1, 3, NA), 
+       lwd=c(2, 2, 2, 2, NA), 
+       pch=c(NA, NA, NA, NA, 15),  # Formes des points pour les nœuds
+       pt.cex=2,  # Taille des points dans la légende
+       bty="y",  # boîte autour de la légende
+       text.col="black", 
+       cex = 1,
+       horiz=FALSE)
+```
