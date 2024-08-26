@@ -8,7 +8,9 @@
 - [Pipeline Description](#pipeline-description)
   - [Differential Expression Analysis (DEG)](#differential-expression-analysis-deg)
   - [WGCNA Analysis](#wgcna-analysis)
+  - [Correlation Analysis](#correlation-analysis)
   - [Lasso Regression](#lasso-regression)
+  - [Corr_genes Analysis](#corr_genes-analysis)
   - [Protein-Protein Interaction (PPI)](#protein-protein-interaction-ppi)
   - [Random Walk with Restart (RWR)](#random-walk-with-restart-rwr)
 - [Usage Instructions](#usage-instructions)
@@ -35,3 +37,60 @@ Clone the workflow repository using the following command:
 ```bash
 git clone https://github.com/cgbaboua/ImmunoExplorer_Workflow.git
 ```
+## Pipeline Description
+
+### Differential Expression Analysis (DEG)
+**Script:** `DEG.Rmd`
+
+The pipeline begins by identifying differentially expressed genes (DEGs) between patient samples and healthy controls using the Limma package. This step highlights the genes that are significantly up- or downregulated in disease states.
+
+- **Inputs:** GEO datasets (GSE72540, GSE57178, GSE72541, GSE185516)
+- **Outputs:** CSV files containing DEG lists.
+
+### WGCNA Analysis
+**Script:** `WGCNA.Rmd`
+
+WGCNA (Weighted Gene Co-expression Network Analysis) is used to identify modules of co-expressed genes. These modules may represent functionally related groups of genes that are involved in similar biological processes.
+
+- **Inputs:** DEG list from the previous step.
+- **Outputs:** Co-expression modules and heatmaps correlating modules with clinical traits.
+
+### Correlation Analysis
+**Script:** `Correlation.Rmd`
+
+This step identifies correlations between WGCNA co-expression modules and clinical traits, offering insights into how certain moodules relate to disease severity and other phenotypic factors.
+
+- **Inputs:** Co-expression modules and clinical trait data.
+- **Outputs:** Corrplots, corr matrix and lists of correlated modules with clinical data.
+
+### Lasso Regression
+**Script:** `Lasso.Rmd`
+
+The Lasso regression method identifies key genes within the modules identified by WGCNA. This regularization method helps narrow down genes to the most influential ones within a co-expression module.
+
+- **Inputs:** Co-expression modules from WGCNA.
+- **Outputs:** List of key genes that contribute most significantly to disease traits.
+
+### Corr_genes Analysis
+**Script:** `Corr_genes.Rmd`
+
+This script focuses on extracting and filtering genes that show strong correlation with clinical traits, prioritizing genes based on their correlation values.
+
+- **Inputs:** DEG list and clinical data.
+- **Outputs:** Filtered list of genes with high correlation scores.
+
+### Protein-Protein Interaction (PPI)
+**Script:** `PPI.Rmd`
+
+This step involves identifying interactions between proteins, leveraging databases such as STRING to construct a protein-protein interaction (PPI) network.
+
+- **Inputs:** DEG list.
+- **Outputs:** PPI network visualizations and interaction lists.
+
+### Random Walk with Restart (RWR)
+**Script:** `RWR.Rmd`
+
+RWR is applied on a multiplex heterogeneous network that combines protein-protein interactions, gene co-expression data, enriched pathways, and clinical correlations. This step helps to prioritize genes and pathways that are central in the disease network.
+
+- **Inputs:** PPI networks,enriched biological pathways,correlations.
+- **Outputs:** Network of prioritized genes and pathways with their potential involvement in disease progression.
