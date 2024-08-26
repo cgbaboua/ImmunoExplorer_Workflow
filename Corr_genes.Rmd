@@ -1,9 +1,5 @@
 ## **Correlation**{.tabset}
 
-:::info
-Unlike the WGCNA analysis and the rest, for the correlations we have decided not to filter the samples to avoid having too little information.
-:::
-
 ```{r,include=F}
 eset_file <- "GSE72540_eset.rds"
 data <- readRDS(sprintf("/home/DA82_SUR/Internship_data/CSU/eSet/%s",eset_file))
