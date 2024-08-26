@@ -11,7 +11,7 @@
   - [Correlation Analysis](#correlation-analysis)
   - [Lasso Regression](#lasso-regression)
   - [Corr_genes Analysis](#corr_genes-analysis)
-  - [Pathways](#pathways)
+  - [Pathways Enrichment Analysis](#pathways-enrichment-analysis)
   - [Protein-Protein Interaction (PPI)](#protein-protein-interaction-ppi)
   - [Random Walk with Restart (RWR)](#random-walk-with-restart-rwr)
 - [Usage Instructions](#usage-instructions)
