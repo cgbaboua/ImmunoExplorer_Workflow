@@ -1,0 +1,53 @@
+## **Protein-Protein Interactions**
+```{r,include=F}
+rm(list=ls())
+```
+
+<!-- Load libraries -->
+```{r}
+library(STRINGdb)
+library(bbcViz)
+```
+
+```{r,include=F}
+data_name <- "GSE72540"
+exprs_data <- read.csv(sprintf("/home/DA82_SUR/Internship_data/CSU/WGCNA/forWGCNA/DEG_%s.csv",data_name))
+#load("/home/DA82_SUR/Internship_data/CSU/Interactions/interactions.RData")
+genes <- exprs_data$Genes
+```
+
+### **Mapped Genes Table**
+```{r,echo=F}
+# Initialiser STRINGdb pour l'humain (taxon ID: 9606) 
+string_db <- STRINGdb$new(version = "12.0", species = 9606, score_threshold = 400, input_directory = "")
+mapped_genes <- string_db$map(data.frame(gene=genes), "gene", removeUnmappedRows = T)
+display_table(mapped_genes,nmax_display = 10)
+```
+
+
+```{r,echo=F}
+#Show PPI
+interactions <- string_db$get_interactions(mapped_genes$STRING_id)
+#display_table(interactions,nmax_display = 10)
+```
+
+### **PPI Table**
+
+```{r,echo=F}
+# Ajouter les noms des gènes aux interactions
+interactions <- merge(interactions, mapped_genes, by.x = "from", by.y = "STRING_id", all.x = TRUE)
+names(interactions)[names(interactions) == "gene"] <- "Gene_from"
+interactions <- merge(interactions, mapped_genes, by.x = "to", by.y = "STRING_id", all.x = TRUE)
+names(interactions)[names(interactions) == "gene"] <- "Gene_to"
+
+# Garder seulement les colonnes pertinentes
+interactions_genes <- interactions[, c("Gene_from", "Gene_to", "combined_score")]
+
+# Afficher les interactions avec les noms des gènes
+display_table(interactions_genes,nmax_display = 10)
+
+# Save it
+filename <- sprintf("~/Internship_data/CSU/Interactions/PPI_interactions_%s.csv",data_name)
+#save(interactions,file="interactions.RData")
+#write.csv(interactions_genes,file=filename,row.names = F)
+```
