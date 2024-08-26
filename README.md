@@ -11,11 +11,12 @@
   - [Correlation Analysis](#correlation-analysis)
   - [Lasso Regression](#lasso-regression)
   - [Corr_genes Analysis](#corr_genes-analysis)
+  - [Pathways](#pathways)
   - [Protein-Protein Interaction (PPI)](#protein-protein-interaction-ppi)
   - [Random Walk with Restart (RWR)](#random-walk-with-restart-rwr)
 - [Usage Instructions](#usage-instructions)
 - [Dependencies](#dependencies)
-- [Additional Resources](#additional-resources)
+
 
 ## Overview
 
@@ -79,6 +80,15 @@ This script focuses on extracting and filtering genes that show strong correlati
 - **Inputs:** DEG list and clinical data.
 - **Outputs:** Filtered list of genes with high correlation scores.
 
+### Pathways Enrichment Analysis
+**Script:** `Pathways.Rmd`
+
+The pathways enrichment step involves mapping the key genes to known biological pathways. This allows for the identification of overrepresented pathways, providing insights into the biological processes most affected in the disease state.
+
+- **Inputs:** Key genes from lasso and DEG list.
+- **Outputs:** Enriched pathways and their associated genes.
+
+
 ### Protein-Protein Interaction (PPI)
 **Script:** `PPI.Rmd`
 
@@ -94,3 +104,27 @@ RWR is applied on a multiplex heterogeneous network that combines protein-protei
 
 - **Inputs:** PPI networks,enriched biological pathways,correlations.
 - **Outputs:** Network of prioritized genes and pathways with their potential involvement in disease progression.
+
+## Usage Instructions
+
+1. **Set up the environment**: Ensure the required version of R is installed, along with all necessary libraries.
+2. **Review outputs**: Check the CSV files, heatmaps, and network visualizations generated during each stage.
+
+## Dependencies
+
+### R Packages:
+- `Limma`
+- `WGCNA`
+- `STRINGdb`
+- `caret`
+- `DOSE`
+- `enrichplot`
+- `corrplot`
+- `igraph`
+- `dnet`
+- `RandomWalkRestartMH`
+
+### Additional Libraries:
+- `Dataframes`
+- `tidyverse`
+- Refer to each specific script for more details on additional required packages.
